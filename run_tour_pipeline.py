@@ -257,7 +257,8 @@ def parse_and_sort_building_matrix(matrix_dir: str = MATRIX_DIR) -> list:
     """
     解析導賞目標建築矩陣（目錄樹結構）。
     讀取 矩陣/ 目錄下所有 .md 子檔案（依固定順序：法定古蹟 → 樓宇-市區 → 樓宇-新界），
-    合併解析後依編號 N（整數）排序。
+    合併解析後依 (子檔案順序, 編號 N) 排序。
+    各子檔案內 N 從 1 起獨立遞增（非全域唯一），以子目錄區分。
     """
     buildings = []
     matrix_files = [os.path.join(matrix_dir, f) for f in MATRIX_FILE_ORDER if os.path.exists(os.path.join(matrix_dir, f))]
@@ -278,6 +279,8 @@ def parse_and_sort_building_matrix(matrix_dir: str = MATRIX_DIR) -> list:
             "completion": "🌚 未開始"
         }]
 
+    file_order = {mf: i for i, mf in enumerate(matrix_files)}
+
     for mf in matrix_files:
         with open(mf, "r", encoding="utf-8") as f:
             for line in f:
@@ -296,13 +299,14 @@ def parse_and_sort_building_matrix(matrix_dir: str = MATRIX_DIR) -> list:
                             "_matrix_file": mf
                         })
 
-    sorted_buildings = sorted(buildings, key=lambda x: int(x["N"]))
+    sorted_buildings = sorted(buildings, key=lambda x: (file_order[x["_matrix_file"]], int(x["N"])))
     return sorted_buildings
 
 
 def update_matrix_entry(n_value: str, building_name: str, link_url: str, matrix_file: str = None) -> str:
-    """生成手冊後更新矩後更新矩陣中的「歷史檔案（連結）」欄位與工作進度狀態。
-    依編號 N（唯一）比對，更新指定子檔案（若提供）或搜尋全部子檔案。
+    """生成手冊後更新矩陣中的「歷史檔案（連結）」欄位與工作進度狀態。
+    依編號 N 比對（各子檔案內 N 從 1 起獨立遞增，非全域唯一），更新指定子檔案。
+    必須提供 matrix_file 以定位正確的子檔案。
     回傳被更新的檔案路徑。
     """
     link_md = f"[`歷史檔案（連結）`]({link_url})"

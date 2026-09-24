@@ -19,11 +19,11 @@ Python + CrewAI. Core dependency is `crewai` (pinned in `pyproject.toml` — see
 - `run_tour_pipeline.py` — main pipeline: parses `矩陣/*.md` (TOC tree), shows a startup TUI (run all / run only 🌚 unstarted / quit), runs a 4-agent crew per building, writes handbooks to `建築/`, dynamically updates the matrix sub-file's 歷史檔案（連結）column + status to 🌕, then auto-commits.
 - `建築/` — generated handbooks in category subdirectories: `建築/法定古蹟/NNNNN-名稱.md` and `建築/樓宇/NNNNN-名稱.md`, where NNNNN = matrix `編號 {N}` zero-padded to 5 digits. Non-ASCII path: enforce UTF-8 in all file ops.
 - `導賞目標建築矩陣.md` — **root TOC index file** linking to `矩陣/*.md` sub-files. Does NOT contain building rows directly.
-- `矩陣/` — **TOC tree sub-files** containing the actual building matrix rows, split by category to control file size. Each file's rows are sorted by `(name, address)` in Unicode codepoint order, then assigned contiguous N:
+- `矩陣/` — **TOC tree sub-files** containing the actual building matrix rows, split by category to control file size. Each file's rows are sorted by `(name, address)` in Unicode codepoint order, then assigned per-file N starting from 1 (NOT globally unique — disambiguated by sub-directory):
   - `法定古蹟.md` — 173 rows (CSDI KML, N=1–173)
-  - `樓宇-市區.md` — 12,381 rows (RVD Urban, N=174–12,554)
-  - `樓宇-新界.md` — 7,656 rows (RVD NT, N=12,555–20,210)
-  - Total: **20,210 buildings** (N=1 to N=20,210). 21 CSDI monuments also in RVD are excluded from RVD to avoid duplicates. Markdown table cells with `|` characters are escaped as `\|`.
+  - `樓宇-市區.md` — 12,381 rows (RVD Urban, N=1–12,381)
+  - `樓宇-新界.md` — 7,656 rows (RVD NT, N=1–7,656)
+  - Total: **20,210 buildings**. 21 CSDI monuments also in RVD are excluded from RVD to avoid duplicates. Markdown table cells with `|` characters are escaped as `\|`.
 
 There is no test suite, lint, or typecheck config yet — none should be assumed.
 
@@ -37,7 +37,7 @@ There is no test suite, lint, or typecheck config yet — none should be assumed
 
 ## Pipeline behavior gotcha
 
-`parse_and_sort_building_matrix` reads sub-files in fixed order (`法定古蹟.md` → `樓宇-市區.md` → `樓宇-新界.md`) and sorts by **N value** (integer). Within each sub-file, rows are pre-sorted by `(name, address)` in Python Unicode codepoint order and assigned contiguous N, so N order already reflects the intended processing order. The 5-digit file id uses the matrix's `編號 {N}` (zero-padded). After each handbook is written, `update_matrix_entry()` updates that building's row in the correct `矩陣/*.md` sub-file (matched by **N value**, not name): status → `🌕 已完成`, link → `` [`歷史檔案（連結）`](建築/{法定古蹟|樓宇}/NNNNN-名稱.md) ``.
+`parse_and_sort_building_matrix` reads sub-files in fixed order (`法定古蹟.md` → `樓宇-市區.md` → `樓宇-新界.md`) and sorts by `(file_order, N)` where N is per-file (each file starts from 1, NOT globally unique). Within each sub-file, rows are pre-sorted by `(name, address)` in Python Unicode codepoint order and assigned contiguous N from 1. The 5-digit file id uses the sub-file's `編號 {N}` (zero-padded), disambiguated by the category sub-directory (`法定古蹟/` or `樓宇/`). After each handbook is written, `update_matrix_entry()` updates that building's row in the correct `矩陣/*.md` sub-file (matched by **N value within the specified matrix_file**, not name): status → `🌕 已完成`, link → `` [`歷史檔案（連結）`](建築/{法定古蹟|樓宇}/NNNNN-名稱.md) ``.
 
 ## Handbook section structure (enforced)
 

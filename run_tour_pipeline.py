@@ -101,7 +101,7 @@ def build_agents(llm: LLM):
 
     checker = Agent(
         role="首席事實查核與信譽評估員",
-        goal="審查資料，過濾 AI 幻覺，指派 CL 1-5 可信度評級，並將專案狀態推進至 🟢 已完成。",
+        goal="審查資料，過濾 AI 幻覺，指派 CL 1-5 可信度評級，並將專案狀態推進至 🌕 已完成。",
         backstory="你對歷史事實要求極度嚴格，能精準評估文獻考證深度與專案推進階段。",
         llm=llm,
         verbose=True
@@ -144,7 +144,7 @@ def build_tasks(agents, inputs: dict):
         description=(
             "對前述資料進行事實查核，將歷史數據整理為表格，指定 CL 1-5 可信度評級，"
             "並確認其「歷史檔案可信性」（目標：{credibility}）。"
-            "請將其目前狀態（{completion}）正式推進至「🟢 已完成」。"
+            "請將其目前狀態（{completion}）正式推進至「🌕 已完成」。"
         ),
         expected_output="含 CL 評級表與狀態推進確認之報告。",
         agent=checker
@@ -218,7 +218,7 @@ def auto_git_commit_and_push(file_path: str, building_name: str, n_id: str, cred
         f"可信性等級：{credibility}\n"
         f"模型：HKO/GLM-5.2-FP8 (zai-org/GLM-5.2-FP8)\n"
         f"結構：六段式標準章節 + CL 評級表 + 動態歷史檔案連結\n"
-        f"矩陣狀態：🟢 已完成"
+        f"矩陣狀態：🌕 已完成"
     )
     run_git_command(["commit", "-m", commit_subject, "-m", commit_body])
     run_git_command(["push", "origin", branch])
@@ -245,7 +245,7 @@ def parse_and_sort_building_matrix(matrix_path: str = MATRIX_PATH) -> list:
             "address": "中環荷李活道10號",
             "tag": "舊中區警署",
             "credibility": "典範",
-            "completion": "🔴 未開始"
+            "completion": "🌚 未開始"
         }]
 
     with open(matrix_path, "r", encoding="utf-8") as f:
@@ -284,10 +284,10 @@ def update_matrix_entry(matrix_path: str, building_name: str, link_url: str):
             if line.startswith("|") and "---" not in line and not line.startswith("| 編號"):
                 parts = [p.strip() for p in line.split("|")[1:-1]]
                 if len(parts) >= 10 and parts[2] == building_name:
-                    parts[8] = "🟢 已完成"
+                    parts[8] = "🌕 已完成"
                     parts[9] = link_md
                     line = "| " + " | ".join(parts) + " |\n"
-                    print(f"📝 矩陣已更新：{building_name} -> 🟢 已完成 | {link_md}")
+                    print(f"📝 矩陣已更新：{building_name} -> 🌕 已完成 | {link_md}")
             f.write(line)
 
 def main():
@@ -302,7 +302,7 @@ def main():
     print("🏛️ 香港導賞團自動化管線 - 啟動選單")
     print("=" * 60)
     print("  [1] 執行全部建築項目 (Run all buildings)")
-    print("  [2] 僅執行「🔴 未開始」項目 (Run only unstarted items)")
+    print("  [2] 僅執行「🌚 未開始」項目 (Run only unstarted items)")
     print("  [3] 離開程式 (Quit)")
     print("-" * 60)
 
@@ -317,7 +317,7 @@ def main():
         return
     elif mode_choice == '2':
         target_buildings = [b for b in buildings if "未開始" in b["completion"]]
-        print(f"\n🔍 已過濾出 {len(target_buildings)} 個「🔴 未開始」的項目準備執行。")
+        print(f"\n🔍 已過濾出 {len(target_buildings)} 個「🌚 未開始」的項目準備執行。")
     else:
         target_buildings = buildings
         print(f"\n⚡ 將依序批次執行全部共 {len(target_buildings)} 個建築項目。")

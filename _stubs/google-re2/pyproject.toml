@@ -1,0 +1,12 @@
+[project]
+name = "google-re2"
+version = "1.1.20251105"
+description = "Stub package for google-re2 on musllinux (Flow CEL expressions not used by this project)"
+requires-python = ">=3.10"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["re2"]

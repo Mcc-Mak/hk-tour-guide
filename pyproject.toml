@@ -1,0 +1,41 @@
+[project]
+name = "hk-guided-tour"
+version = "0.1.0"
+description = "Hong Kong guided tour handbook auto-generation pipeline (CrewAI)"
+requires-python = ">=3.11"
+
+dependencies = [
+    # CrewAI framework — owner-confirmed pin.
+    "crewai==1.15.22",
+    # lancedb is a transitive dep of crewai with no musllinux wheels. We add it
+    # as a direct dep so the [tool.uv.sources] override takes effect, pointing
+    # to our local stub. This project never uses crewai's Memory/storage features.
+    "lancedb>=0.29.2,<0.30.1",
+    # onnxruntime is a transitive dep of chromadb (via crewai) with no
+    # musllinux wheels. Same approach — stub satisfies install, never called.
+    "onnxruntime",
+    # google-re2 is a transitive dep of cel-python (via crewai) that needs
+    # C++ compilation (abseil-cpp) not available on musllinux. Used only for
+    # Flow CEL expressions; this project doesn't use Flow.
+    "google-re2",
+    # chromadb is a transitive dep of crewai that requires Rust compilation
+    # (maturin + cargo) unavailable on musllinux. Used only for RAG/Memory.
+    "chromadb~=1.1.0",
+    # numpy is needed at import time by crewai's rag/memory modules even when
+    # those features aren't used. The chromadb stub doesn't pull it in.
+    "numpy",
+]
+
+[tool.uv.sources]
+# lancedb (transitive dep of crewai) has no musllinux wheels. This project never
+# uses crewai's Memory/storage features, so a local stub satisfies the install.
+lancedb = { path = "./_stubs/lancedb" }
+# onnxruntime (transitive dep of chromadb via crewai) has no musllinux wheels.
+# This project never uses RAG embeddings, so a local stub satisfies the install.
+onnxruntime = { path = "./_stubs/onnxruntime" }
+# google-re2 (transitive dep of cel-python via crewai) requires C++ compilation
+# with abseil-cpp. This project never uses Flow CEL expressions, so stub is safe.
+"google-re2" = { path = "./_stubs/google-re2" }
+# chromadb (transitive dep of crewai) requires Rust/cargo compilation. This
+# project never uses RAG/Memory, so a stub satisfies the install.
+chromadb = { path = "./_stubs/chromadb" }

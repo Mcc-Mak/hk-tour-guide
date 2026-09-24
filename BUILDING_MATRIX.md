@@ -1,0 +1,10 @@
+# 導賞目標建築矩陣 (Building Matrix)
+
+> *註：矩陣中的「歷史檔案（連結）」欄位統一預設為交由 CrewAI 動態產出的標示，實際內容由 AI 在生成手冊時填入 Markdown 連結。*
+
+| 編號 {N} | 導賞專案類別 | 中文名稱 | 英文名稱 | 中文地址 | 英文地址 | 參考標籤 | 歷史檔案可信性 | 歷史檔案工作進度 | 歷史檔案（連結） |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| 1 | 香港法定古蹟導賞團 | 前立法會大樓 | Former Legislative Council Building | 中環遮打道8號 | 8 Chater Road, Central | 前立法會大樓 | 典範 | 🔴 未開始 | *(由 CrewAI 動態產出 Markdown 連結)* |
+| 2 | 香港法定古蹟導賞團 | 舊中區警署 | Former Central Police Station | 中環荷李活道10號 | 10 Hollywood Road, Central | 舊中區警署 | 典範 | 🔴 未開始 | *(由 CrewAI 動態產出 Markdown 連結)* |
+| 3 | 香港樓宇導賞團 | 藍屋建築群 | Blue House Cluster | 灣仔石水渠街72-74號 | 72-74 Stone Nullah Lane, Wan Chai | 藍屋建築群 | 完整 | 🔴 未開始 | *(由 CrewAI 動態產出 Markdown 連結)* |
+| 4 | 香港樓宇導賞團 | 雷生春 | Lui Seng Chun | 旺角荔枝角道119號 | 119 Lai Chi Kok Road, Mong Kok | 雷生春 | 種子 | 🔴 未開始 | *(由 CrewAI 動態產出 Markdown 連結)* |

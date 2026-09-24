@@ -38,6 +38,14 @@ from crewai import Agent, Crew, Process, Task, LLM
 
 MATRIX_PATH = "導賞目標建築矩陣.md"
 MATRIX_DIR = "矩陣"
+BUILDING_DIR = "建築"
+MATRIX_FILE_ORDER = ["法定古蹟.md", "樓宇-市區.md", "樓宇-新界.md"]
+
+def _category_to_subdir(category: str) -> str:
+    """Map matrix category to handbook subdirectory name."""
+    if "法定古蹟" in category:
+        return "法定古蹟"
+    return "樓宇"
 
 def _split_matrix_row(line: str) -> list:
     """Split a Markdown table row on | (respecting \\| escapes), un-escape, and strip."""
@@ -230,7 +238,7 @@ def auto_git_commit_and_push(file_path: str, building_name: str, n_id: str, cred
     commit_subject = f"docs(tour): 生成 {building_name} 導賞手冊"
     commit_body = (
         f"建築名稱：{building_name}\n"
-        f"檔案路徑：建築/{n_id}-{building_name}.md\n"
+        f"檔案路徑：{file_path}\n"
         f"矩陣編號：{n_id}\n"
         f"可信性等級：{credibility}\n"
         f"模型：HKO/GLM-5.2-FP8 (zai-org/GLM-5.2-FP8)\n"
@@ -247,15 +255,17 @@ def auto_git_commit_and_push(file_path: str, building_name: str, n_id: str, cred
 
 def parse_and_sort_building_matrix(matrix_dir: str = MATRIX_DIR) -> list:
     """
-    解析導賞目標建築矩陣（目錄樹結構）並依序以：
-    1. 導賞專案類別
-    2. 中文名稱
-    3. 中文地址
-    進行排序。
-    讀取 矩陣/ 目錄下所有 .md 子檔案，合併解析。
+    解析導賞目標建築矩陣（目錄樹結構）。
+    讀取 矩陣/ 目錄下所有 .md 子檔案（依固定順序：法定古蹟 → 樓宇-市區 → 樓宇-新界），
+    合併解析後依編號 N（整數）排序。
     """
     buildings = []
-    matrix_files = sorted(glob.glob(os.path.join(matrix_dir, "*.md")))
+    matrix_files = [os.path.join(matrix_dir, f) for f in MATRIX_FILE_ORDER if os.path.exists(os.path.join(matrix_dir, f))]
+    # Also pick up any unexpected .md files not in FILE_ORDER
+    extra = sorted(glob.glob(os.path.join(matrix_dir, "*.md")))
+    for f in extra:
+        if f not in matrix_files:
+            matrix_files.append(f)
 
     if not matrix_files:
         return [{
@@ -286,16 +296,12 @@ def parse_and_sort_building_matrix(matrix_dir: str = MATRIX_DIR) -> list:
                             "_matrix_file": mf
                         })
 
-    # 依照要求排序：導賞專案類別、中文名稱、中文地址
-    sorted_buildings = sorted(
-        buildings,
-        key=lambda x: (x["category"], x["name"], x["address"])
-    )
+    sorted_buildings = sorted(buildings, key=lambda x: int(x["N"]))
     return sorted_buildings
 
 
 def update_matrix_entry(n_value: str, building_name: str, link_url: str, matrix_file: str = None) -> str:
-    """生成手冊後更新矩陣中的「歷史檔案（連結）」欄位與工作進度狀態。
+    """生成手冊後更新矩後更新矩陣中的「歷史檔案（連結）」欄位與工作進度狀態。
     依編號 N（唯一）比對，更新指定子檔案（若提供）或搜尋全部子檔案。
     回傳被更新的檔案路徑。
     """
@@ -331,11 +337,12 @@ def update_matrix_entry(n_value: str, building_name: str, link_url: str, matrix_
     return None
 
 def main():
-    output_dir = Path("建築")
-    output_dir.mkdir(exist_ok=True)
+    output_root = Path(BUILDING_DIR)
+    (output_root / "法定古蹟").mkdir(parents=True, exist_ok=True)
+    (output_root / "樓宇").mkdir(parents=True, exist_ok=True)
 
     buildings = parse_and_sort_building_matrix()
-    print(f"📋 共讀取到 {len(buildings)} 棟標的建築（已依規則排序）。\n")
+    print(f"📋 共讀取到 {len(buildings)} 棟標的建築（已依編號 N 排序）。\n")
 
     # === 啟動選單 TUI（在每次執行開頭詢問一次） ===
     print("=" * 60)
@@ -378,7 +385,8 @@ def main():
         credibility = item["credibility"]
         completion = item["completion"]
 
-        file_path = output_dir / f"{n_id}-{b_name}.md"
+        subdir = _category_to_subdir(category)
+        file_path = output_root / subdir / f"{n_id}-{b_name}.md"
 
         print(f"--------------------------------------------------")
         print(f"🏗️ 正在處理 [編號 {item['N']}] {b_name} ({category}) | 狀態: {completion} -> 啟動 CrewAI...")
@@ -398,7 +406,7 @@ def main():
             f.write(content)
         print(f"📄 手冊已成功寫入: {file_path}")
 
-        updated_file = update_matrix_entry(item["N"], b_name, f"建築/{n_id}-{b_name}.md", item.get("_matrix_file"))
+        updated_file = update_matrix_entry(item["N"], b_name, f"建築/{subdir}/{n_id}-{b_name}.md", item.get("_matrix_file"))
 
         auto_git_commit_and_push(str(file_path), b_name, n_id=n_id, credibility=credibility, matrix_file=updated_file, branch="dev-001")
         print(f"✨ [{b_name}] 處理完成！\n")

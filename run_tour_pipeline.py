@@ -10,7 +10,9 @@
 - 自動進行 Git Add, Commit 與 Push
 """
 
+import glob
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -35,6 +37,18 @@ httpx.AsyncClient.__init__ = _patched_async_client_init
 from crewai import Agent, Crew, Process, Task, LLM
 
 MATRIX_PATH = "導賞目標建築矩陣.md"
+MATRIX_DIR = "矩陣"
+
+def _split_matrix_row(line: str) -> list:
+    """Split a Markdown table row on | (respecting \\| escapes), un-escape, and strip."""
+    parts = re.split(r'(?<!\\)\|', line)
+    parts = parts[1:-1]  # drop leading/trailing empty from | ... |
+    return [p.strip().replace('\\|', '|') for p in parts]
+
+def _join_matrix_row(parts: list) -> str:
+    """Join parts into a Markdown table row, escaping | characters."""
+    escaped = [p.replace('|', '\\|') for p in parts]
+    return "| " + " | ".join(escaped) + " |\n"
 
 # ==========================================
 # 1. LLM 初始化配置 (含 Fallback 機制)
@@ -207,9 +221,12 @@ def run_git_command(args: list):
     else:
         print(f" Git: git {' '.join(args)}")
 
-def auto_git_commit_and_push(file_path: str, building_name: str, n_id: str, credibility: str, matrix_path: str = MATRIX_PATH, branch: str = "dev-001"):
+def auto_git_commit_and_push(file_path: str, building_name: str, n_id: str, credibility: str, matrix_file: str = None, branch: str = "dev-001"):
     print(f"📦 對 {file_path} 進行版本控制...")
-    run_git_command(["add", file_path, matrix_path])
+    git_add_args = ["add", file_path]
+    if matrix_file:
+        git_add_args.append(matrix_file)
+    run_git_command(git_add_args)
     commit_subject = f"docs(tour): 生成 {building_name} 導賞手冊"
     commit_body = (
         f"建築名稱：{building_name}\n"
@@ -228,16 +245,19 @@ def auto_git_commit_and_push(file_path: str, building_name: str, n_id: str, cred
 # ==========================================
 
 
-def parse_and_sort_building_matrix(matrix_path: str = MATRIX_PATH) -> list:
+def parse_and_sort_building_matrix(matrix_dir: str = MATRIX_DIR) -> list:
     """
-    解析導賞目標建築矩陣並依序以：
+    解析導賞目標建築矩陣（目錄樹結構）並依序以：
     1. 導賞專案類別
     2. 中文名稱
     3. 中文地址
-    進行排序
+    進行排序。
+    讀取 矩陣/ 目錄下所有 .md 子檔案，合併解析。
     """
     buildings = []
-    if not os.path.exists(matrix_path):
+    matrix_files = sorted(glob.glob(os.path.join(matrix_dir, "*.md")))
+
+    if not matrix_files:
         return [{
             "N": "1",
             "category": "香港法定古蹟導賞團",
@@ -248,21 +268,23 @@ def parse_and_sort_building_matrix(matrix_path: str = MATRIX_PATH) -> list:
             "completion": "🌚 未開始"
         }]
 
-    with open(matrix_path, "r", encoding="utf-8") as f:
-        for line in f:
-            if line.startswith("|") and not line.startswith("| 編號") and "---" not in line:
-                parts = [p.strip() for p in line.split("|")[1:-1]]
-                if len(parts) >= 10:
-                    buildings.append({
-                        "N": parts[0],
-                        "category": parts[1],
-                        "name": parts[2],
-                        "address": parts[4],
-                        "tag": parts[6],
-                        "credibility": parts[7],
-                        "completion": parts[8],
-                        "link": parts[9]
-                    })
+    for mf in matrix_files:
+        with open(mf, "r", encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("|") and not line.startswith("| 編號") and "---" not in line:
+                    parts = _split_matrix_row(line)
+                    if len(parts) >= 10 and parts[0].isdigit():
+                        buildings.append({
+                            "N": parts[0],
+                            "category": parts[1],
+                            "name": parts[2],
+                            "address": parts[4],
+                            "tag": parts[6],
+                            "credibility": parts[7],
+                            "completion": parts[8],
+                            "link": parts[9],
+                            "_matrix_file": mf
+                        })
 
     # 依照要求排序：導賞專案類別、中文名稱、中文地址
     sorted_buildings = sorted(
@@ -272,23 +294,41 @@ def parse_and_sort_building_matrix(matrix_path: str = MATRIX_PATH) -> list:
     return sorted_buildings
 
 
-def update_matrix_entry(matrix_path: str, building_name: str, link_url: str):
-    """生成手冊後更新矩陣中的「歷史檔案（連結）」欄位與工作進度狀態"""
+def update_matrix_entry(n_value: str, building_name: str, link_url: str, matrix_file: str = None) -> str:
+    """生成手冊後更新矩陣中的「歷史檔案（連結）」欄位與工作進度狀態。
+    依編號 N（唯一）比對，更新指定子檔案（若提供）或搜尋全部子檔案。
+    回傳被更新的檔案路徑。
+    """
     link_md = f"[`歷史檔案（連結）`]({link_url})"
 
-    with open(matrix_path, "r", encoding="utf-8") as f:
-        lines = f.readlines()
+    if matrix_file:
+        search_files = [matrix_file]
+    else:
+        search_files = sorted(glob.glob(os.path.join(MATRIX_DIR, "*.md")))
 
-    with open(matrix_path, "w", encoding="utf-8") as f:
-        for line in lines:
-            if line.startswith("|") and "---" not in line and not line.startswith("| 編號"):
-                parts = [p.strip() for p in line.split("|")[1:-1]]
-                if len(parts) >= 10 and parts[2] == building_name:
-                    parts[8] = "🌕 已完成"
-                    parts[9] = link_md
-                    line = "| " + " | ".join(parts) + " |\n"
-                    print(f"📝 矩陣已更新：{building_name} -> 🌕 已完成 | {link_md}")
-            f.write(line)
+    for mf in search_files:
+        if not os.path.exists(mf):
+            continue
+        with open(mf, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+
+        updated = False
+        with open(mf, "w", encoding="utf-8") as f:
+            for line in lines:
+                if line.startswith("|") and "---" not in line and not line.startswith("| 編號"):
+                    parts = _split_matrix_row(line)
+                    if len(parts) >= 10 and parts[0] == n_value:
+                        parts[8] = "🌕 已完成"
+                        parts[9] = link_md
+                        line = _join_matrix_row(parts)
+                        print(f"📝 矩陣已更新：N={n_value} {building_name} -> 🌕 已完成 | {link_md} (in {mf})")
+                        updated = True
+                f.write(line)
+
+        if updated:
+            return mf
+    print(f"⚠️ 找不到編號 N={n_value}（{building_name}）的矩陣項目。")
+    return None
 
 def main():
     output_dir = Path("建築")
@@ -358,9 +398,9 @@ def main():
             f.write(content)
         print(f"📄 手冊已成功寫入: {file_path}")
 
-        update_matrix_entry(MATRIX_PATH, b_name, f"建築/{n_id}-{b_name}.md")
+        updated_file = update_matrix_entry(item["N"], b_name, f"建築/{n_id}-{b_name}.md", item.get("_matrix_file"))
 
-        auto_git_commit_and_push(str(file_path), b_name, n_id=n_id, credibility=credibility, matrix_path=MATRIX_PATH, branch="dev-001")
+        auto_git_commit_and_push(str(file_path), b_name, n_id=n_id, credibility=credibility, matrix_file=updated_file, branch="dev-001")
         print(f"✨ [{b_name}] 處理完成！\n")
 
     print("\n🎉 選定的所有導賞手冊均已成功透過 CrewAI 動態生成 Markdown 檔案連結並提交至 Git！")

@@ -404,7 +404,11 @@ def main():
             "completion": completion
         }
 
-        content = execute_crew_with_fallback(build_agents, build_tasks, inputs)
+        try:
+            content = execute_crew_with_fallback(build_agents, build_tasks, inputs)
+        except Exception as e:
+            print(f"❌ [{b_name}] 生成失敗，跳過此建築。錯誤: {e}")
+            continue
 
         with open(file_path, "w", encoding="utf-8") as f:
             f.write(content)

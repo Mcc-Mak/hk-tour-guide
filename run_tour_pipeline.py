@@ -11,9 +11,12 @@
 """
 
 import glob
+import json
 import os
 import re
 import subprocess
+import traceback
+from datetime import datetime
 from pathlib import Path
 
 import httpx
@@ -47,6 +50,16 @@ def _category_to_subdir(category: str) -> str:
         return "法定古蹟"
     return "樓宇"
 
+def _sanitize_filename(name: str) -> str:
+    """將建築名稱清理為安全的檔名片段。
+    保留繁體中文（CJK 統一漢字及擴充區）、0-9、a-zA-Z 與底線；
+    其餘字元（含路徑分隔字元 / \\ 與其他保留字元）一律以底線取代，
+    並摺疊連續底線、去除首尾底線，避免 Linux 檔名錯誤。
+    """
+    cleaned = re.sub(r'[^\u4e00-\u9fff\u3400-\u4dbf\U00020000-\U0002a6df\U0002a700-\U0002b73f0-9a-zA-Z_]', '_', name)
+    cleaned = re.sub(r'_+', '_', cleaned).strip('_')
+    return cleaned or "unnamed"
+
 def _split_matrix_row(line: str) -> list:
     """Split a Markdown table row on | (respecting \\| escapes), un-escape, and strip."""
     parts = re.split(r'(?<!\\)\|', line)
@@ -70,7 +83,10 @@ def get_primary_llm() -> LLM:
         base_url="https://litellm.services.hko.gov.hk",
         api_key=hko_api_key if hko_api_key else "dummy_key",
         temperature=0.2,
-        timeout=180
+        timeout=600,
+        max_tokens=16000,
+        max_retries=0,
+        stream=False,
     )
 
 def get_fallback_llm() -> LLM:
@@ -80,72 +96,292 @@ def get_fallback_llm() -> LLM:
         base_url="https://api.opencode.ai/v1",
         api_key=os.getenv("OPENCODE_API_KEY", "free-tier"),
         temperature=0.2,
-        timeout=180
+        timeout=600,
+        max_tokens=16000,
+        max_retries=0,
+        stream=False,
     )
 
-def execute_crew_with_fallback(agents_builder_func, tasks_builder_func, inputs: dict) -> str:
-    """執行 CrewAI 任務，具備自動 Fallback 機制"""
+def preflight_llm_check(model: str, base_url: str, api_key: str, label: str) -> bool:
+    """以最小化呼叫測試 LLM 連線是否正常。max_tokens=1 可在 ~10s 內完成；認證錯誤則在 0.1s 內回傳。"""
+    print(f"🔍 正在測試 {label} 連線...")
+    bare_model = model.replace("openai/", "")
+    endpoint = f"{base_url.rstrip('/')}/chat/completions"
     try:
-        print("🚀 正在嘗試使用優先模型: HKO/GLM-5.2-FP8...")
-        primary_llm = get_primary_llm()
-        agents = agents_builder_func(primary_llm)
-        tasks = tasks_builder_func(agents, inputs)
-        crew = Crew(agents=agents, tasks=tasks, process=Process.sequential, verbose=True)
-        result = crew.kickoff(inputs=inputs)
-        print("✅ HKO/GLM-5.2-FP8 執行成功！")
-        return str(result)
+        with httpx.Client(verify=False, timeout=httpx.Timeout(60.0, connect=10.0)) as client:
+            r = client.post(
+                endpoint,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": bare_model,
+                    "messages": [{"role": "user", "content": "OK"}],
+                    "max_tokens": 1,
+                    "temperature": 0.0,
+                    "stream": False,
+                },
+            )
+            if r.status_code == 200:
+                print(f"✅ {label} 連線正常（HTTP 200）")
+                return True
+            else:
+                print(f"⚠️ {label} 連線測試失敗：HTTP {r.status_code} - {r.text[:200]}")
+                return False
     except Exception as e:
-        print(f"⚠️ 優先模型調用失敗: {e}")
-        print("🔄 自動切換（Fallback）至免費模型: OpenCode-Zen...")
-        try:
-            fallback_llm = get_fallback_llm()
-            agents = agents_builder_func(fallback_llm)
+        print(f"⚠️ {label} 連線測試失敗: {e}")
+        return False
+
+def _print_failure_diagnostics(exc: Exception, attempt, max_attempts, inputs: dict, model_label: str = "", building_label: str = ""):
+    """Print structured failure diagnostics for debugging LLM/CrewAI errors."""
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print("=" * 60)
+    print(f"🐛 [FAILURE DIAGNOSTICS] {ts}")
+    print("=" * 60)
+    if building_label:
+        print(f"  Building:      {building_label}")
+    print(f"  Model:         {model_label}")
+    print(f"  Attempt:       {attempt}/{max_attempts}")
+    print(f"  Exception type: {type(exc).__name__}")
+    print(f"  Exception msg:  {exc}")
+    print(f"  Inputs:")
+    for k, v in inputs.items():
+        print(f"    {k}: {v}")
+    print(f"  Full traceback:")
+    tb_lines = traceback.format_exception(type(exc), exc, exc.__traceback__)
+    for line in "".join(tb_lines).rstrip().splitlines():
+        print(f"    {line}")
+    print("=" * 60)
+
+def _detect_failed_agent(tasks: list) -> int:
+    """Detect the 0-based index of the first task whose agent failed (no usable output).
+
+    Returns the index (0–3), or -1 if all tasks have valid non-empty output.
+    """
+    for i, task in enumerate(tasks):
+        output = getattr(task, "output", None)
+        raw = getattr(output, "raw", None) if output else None
+        if raw is None or not str(raw).strip():
+            return i
+    return -1
+
+
+def execute_crew_with_fallback(agents_builder_func, tasks_builder_func, inputs: dict) -> str:
+    """執行 CrewAI 任務，採用三階段重試策略。
+
+    第 1 次（正常）：完整 Crew，全部 Agent 使用 HKO/GLM-5.2-FP8。
+    第 2 次（重試）：完整 Crew，全部 Agent 使用 HKO/GLM-5.2-FP8。
+    第 3 次（特殊）：依偵測到的失敗 Agent 決定策略——
+      • Agent 1 失敗 → 重建完整 Crew，Agent 1+4 改用 Big Pickle (OpenCode-Zen)，Agent 2+3 續用 GLM-5.2-FP8。
+      • Agent 4 失敗 → 重用 Agent 1-3 之之輸出，僅以 Big Pickle 重跑 Agent 4。
+    Big Pickle 之任何失敗（連線、空內容、例外）均拋出 RuntimeError，由呼叫端 catch 後跳過此建築，不中斷管線。
+    """
+    MAX_ATTEMPTS = 3
+
+    # === Pre-flight：優先模型連線測試 ===
+    hko_api_key = os.getenv("HKOAI_API_KEY", "")
+    primary_ok = preflight_llm_check(
+        "openai/zai-org/GLM-5.2-FP8",
+        "https://litellm.services.hko.gov.hk",
+        hko_api_key,
+        "HKO/GLM-5.2-FP8（優先模型）",
+    )
+
+    failed_idx = -1
+    last_tasks = None
+
+    # === 第 1、2 次嘗試：完整 Crew + GLM-5.2-FP8 ===
+    if primary_ok:
+        primary_llm = get_primary_llm()
+        for attempt in (1, 2):
+            label = "正常嘗試" if attempt == 1 else "第 1 次重試"
+            print(f"🚀 [{label}] 使用優先模型 HKO/GLM-5.2-FP8（第 {attempt}/{MAX_ATTEMPTS} 次）...")
+            try:
+                agents = agents_builder_func(primary_llm)
+                tasks = tasks_builder_func(agents, inputs)
+                last_tasks = tasks
+                crew = Crew(agents=agents, tasks=tasks, process=Process.sequential, verbose=True)
+                result = crew.kickoff(inputs=inputs)
+                content = str(result)
+                if content and content.strip():
+                    print(f"✅ HKO/GLM-5.2-FP8 執行成功！（第 {attempt} 次嘗試）")
+                    return content
+                print(f"⚠️ 第 {attempt} 次嘗試返回空內容。")
+                if last_tasks:
+                    failed_idx = _detect_failed_agent(last_tasks)
+            except Exception as e:
+                _print_failure_diagnostics(e, attempt, MAX_ATTEMPTS, inputs, model_label="HKO/GLM-5.2-FP8")
+                if last_tasks:
+                    failed_idx = _detect_failed_agent(last_tasks)
+                    print(f"🔍 偵測到失敗的 Agent 索引：{failed_idx}（0-3，-1=無法判定）")
+        print(f"⚠️ 優先模型已嘗試 2 次均失敗。")
+    else:
+        print("⚠️ 優先模型連線測試未通過，跳過前兩次嘗試。")
+        failed_idx = 0
+
+    # === 第 3 次嘗試：Big Pickle (OpenCode-Zen) 特殊重試 ===
+    oc_api_key = os.getenv("OPENCODE_API_KEY", "")
+    if not oc_api_key:
+        print("⚠️ OPENCODE_API_KEY 未設定，無法使用 Big Pickle 特殊重試。")
+        raise RuntimeError("❌ 優先模型 2 次嘗試均失敗，且 Big Pickle (OPENCODE_API_KEY) 不可用。")
+
+    print("🔄 啟動第 3 次特殊重試（Big Pickle / OpenCode-Zen）...")
+
+    if not preflight_llm_check(
+        "openai/opencode-zen",
+        "https://api.opencode.ai/v1",
+        oc_api_key,
+        "OpenCode-Zen（Big Pickle）",
+    ):
+        print("⚠️ Big Pickle 連線測試未通過。跳過此建築，管線繼續。")
+        raise RuntimeError("❌ Big Pickle 連線測試未通過。")
+
+    fallback_llm = get_fallback_llm()
+    primary_llm = primary_llm if primary_ok else get_primary_llm()
+
+    if failed_idx < 0:
+        failed_idx = 0
+        print("⚠️ 無法明確判定失敗的 Agent，預設為 Agent 1（索引 0）。")
+
+    try:
+        if failed_idx == 3 and last_tasks is not None:
+            # --- Agent 4 失敗：重用 Agent 1-3 輸出，僅以 Big Pickle 重跑 Agent 4 ---
+            print("🔄 策略：Agent 4（導賞手冊總編輯）失敗，僅以 Big Pickle 重試 Agent 4...")
+
+            prior_raws = []
+            for i in range(3):
+                output = getattr(last_tasks[i], "output", None)
+                raw = getattr(output, "raw", None) if output else None
+                prior_raws.append(str(raw) if raw else "")
+
+            editor_agent = agents_builder_func(fallback_llm)[3]
+            editor_task = _build_editor_task_with_context(editor_agent, inputs, prior_raws)
+
+            crew = Crew(agents=[editor_agent], tasks=[editor_task], process=Process.sequential, verbose=True)
+            result = crew.kickoff(inputs=inputs)
+            content = str(result)
+            if content and content.strip():
+                print("✅ Big Pickle Agent 4 重試成功！")
+                return content
+            print("⚠️ Big Pickle Agent 4 重試返回空內容。")
+            raise RuntimeError("❌ Big Pickle Agent 4 重試返回空內容。")
+
+        else:
+            # --- Agent 1 失敗（或未知）：重建完整 Crew，Agent 1+4 用 Big Pickle ---
+            agent_label = failed_idx + 1 if failed_idx >= 0 else "?"
+            print(f"🔄 策略：Agent {agent_label} 失敗，重建完整 Crew（Agent 1+4 用 Big Pickle，Agent 2+3 用 GLM-5.2-FP8）...")
+
+            agents = agents_builder_func(
+                primary_llm,
+                fallback_llm=fallback_llm,
+                fallback_indices=frozenset({0, 3}),
+            )
             tasks = tasks_builder_func(agents, inputs)
             crew = Crew(agents=agents, tasks=tasks, process=Process.sequential, verbose=True)
             result = crew.kickoff(inputs=inputs)
-            print("✅ OpenCode-Zen Fallback 執行成功！")
-            return str(result)
-        except Exception as fb_err:
-            raise RuntimeError(f"❌ 所有 LLM 模型（含 Fallback）均調用失敗: {fb_err}")
+            content = str(result)
+            if content and content.strip():
+                print("✅ Big Pickle 混合 Crew 重試成功！")
+                return content
+            print("⚠️ Big Pickle 混合 Crew 重試返回空內容。")
+            raise RuntimeError("❌ Big Pickle 混合 Crew 重試返回空內容。")
+
+    except RuntimeError:
+        raise
+    except Exception as e:
+        _print_failure_diagnostics(e, 3, MAX_ATTEMPTS, inputs, model_label="OpenCode-Zen (Big Pickle)")
+        raise RuntimeError(f"❌ Big Pickle 重試失敗：{e}") from e
 
 # ==========================================
 # 2. 定義 CrewAI Agents 與 Tasks
 # ==========================================
 
-def build_agents(llm: LLM):
-    researcher = Agent(
+_AGENT_DEFS = [
+    dict(
         role="香港官方檔案研究員",
         goal="搜集目標建築的官方歷史檔案、建築風格與背景，並自主挖掘、驗證最具公信力的官方檔案，**強制以 Markdown 超連結格式（例如 `[官方檔案名稱](URL)`）輸出「歷史檔案（連結）」**。",
         backstory="你是一位資深香港歷史研究員，精通香港開放資料集、古物古蹟辦事處 (AMO) 資料與官方文獻。",
-        llm=llm,
-        verbose=True
-    )
-
-    checker = Agent(
+    ),
+    dict(
         role="首席事實查核與信譽評估員",
         goal="審查資料，過濾 AI 幻覺，指派 CL 1-5 可信度評級，並將專案狀態推進至 🌕 已完成。",
         backstory="你對歷史事實要求極度嚴格，能精準評估文獻考證深度與專案推進階段。",
-        llm=llm,
-        verbose=True
-    )
-
-    writer = Agent(
+    ),
+    dict(
         role="文化導賞故事編劇",
         goal="撰寫符合香港在地導賞風格、生動且專業的繁體中文導賞解說詞。",
         backstory="你是導賞員培訓導師，精通以故事化手法介紹香港歷史建築。",
-        llm=llm,
-        verbose=True
-    )
-
-    editor = Agent(
+    ),
+    dict(
         role="導賞手冊總編輯",
         goal="整合所有資料，格式化為標準 Markdown 文檔，**確保手冊中的「歷史檔案（連結）」欄位由 CrewAI 官方檔案研究員動態產出，且所有連結必須嚴格採用 Markdown 語法（[顯示名稱](URL)）呈現**。",
         backstory="你是出版社主編，對導賞手冊的格式規範、結構排版與 Markdown 超連結宣告有最高要求。",
-        llm=llm,
-        verbose=True
+    ),
+]
+
+def build_agents(llm: LLM, fallback_llm: LLM = None, fallback_indices: frozenset = None):
+    """Build the 4 CrewAI agents.
+
+    If *fallback_llm* and *fallback_indices* are provided, agents at those
+    0-based indices use *fallback_llm*; all others use *llm*.
+    """
+    fallback_indices = fallback_indices or frozenset()
+
+    def _llm_for(idx: int) -> LLM:
+        return fallback_llm if idx in fallback_indices else llm
+
+    agents = []
+    for idx, adef in enumerate(_AGENT_DEFS):
+        agents.append(
+            Agent(
+                role=adef["role"],
+                goal=adef["goal"],
+                backstory=adef["backstory"],
+                llm=_llm_for(idx),
+                verbose=True,
+                max_retry_limit=0,
+            )
+        )
+    return agents
+
+def _editor_task_description() -> str:
+    return (
+        "將以上所有內容匯整為一份標準 Markdown 格式手冊。\n"
+        "必須嚴格遵循以下章節結構（使用中文數字編號一至六），不可增減章節：\n\n"
+        "## 一、導賞概覽與地址資訊\n"
+        "### 建築基本資料\n"
+        "（必須包含表格：建築名稱、地址、建設年份、建築風格、歷史評級）\n"
+        "### 導賞路線建議\n\n"
+        "## 二、歷史脈絡與建築特色\n"
+        "### 建築風格與特色\n"
+        "### 歷史事件與背景\n"
+        "（必須以「#### {歷史時期/特徵}」作為四級子標題分組，每組下列條目必須採用「- {年份}：{歷史描述}」格式條列）\n\n"
+        "## 三、事實查核與可信度評級表（CL 1-5）\n"
+        "### 歷史數據查核結果\n"
+        "（必須包含表格：項目、報告記載內容、查核結果、佐證來源、CL 評級）\n"
+        "### AI 幻覺過濾檢測報告\n"
+        "### 整體可信度評級\n"
+        "（必須包含表格：評估維度、CL 評級、說明）\n\n"
+        "## 四、歷史檔案狀態宣告\n"
+        "### 可信性等級\n"
+        "### 歷史檔案（連結）\n"
+        "（由 CrewAI 研究員動態產出，必須為編號清單格式，每條連結嚴格採用 `[`CL {可信度評級}：{機構名稱}`](URL)` 格式，"
+        "並在清單上方加入引述區塊：> **以下歷史檔案連結由 CrewAI 官方檔案研究員動態產出，所有連結均經過驗證，指向香港特別行政區政府官方機構網域。**）\n\n"
+        "## 五、導賞員現場講稿\n"
+        "### 開場白\n"
+        "### 各站點\n"
+        "（每個站點以「### {站點名稱}」為三級標題，其下必須包含「#### 現場觀察重點」與「#### 歷史故事」兩個四級子標題）\n"
+        "### 結語\n\n"
+        "## 六、參考資料來源\n"
+        "### 官方檔案\n"
+        "（所有連結必須採用 Markdown 超連結格式 [`CL {可信度評級}：{機構名稱}`](URL)）\n"
+        "### 參考文獻清單\n\n"
+        "全篇使用專業繁體中文。歷史事件章節中的每一條目必須嚴格採用「{年份}：{歷史描述}」格式，並按「{歷史時期/特徵}」分組。"
     )
 
-    return [researcher, checker, writer, editor]
+def _editor_task_expected_output() -> str:
+    return "結構完整的 Markdown 導賞手導賞手冊全文，嚴格遵循上述六大章節結構與子標題規範，歷史事件以「{年份}：{歷史描述}」格式按「{歷史時期/特徵}」分組，含 CrewAI 動態產出之 Markdown 歷史檔案超連結。"
 
 def build_tasks(agents, inputs: dict):
     researcher, checker, writer, editor = agents
@@ -179,44 +415,43 @@ def build_tasks(agents, inputs: dict):
     )
 
     t4 = Task(
-        description=(
-            "將以上所有內容匯整為一份標準 Markdown 格式手冊。\n"
-            "必須嚴格遵循以下章節結構（使用中文數字編號一至六），不可增減章節：\n\n"
-            "## 一、導賞概覽與地址資訊\n"
-            "### 建築基本資料\n"
-            "（必須包含表格：建築名稱、地址、建設年份、建築風格、歷史評級）\n"
-            "### 導賞路線建議\n\n"
-            "## 二、歷史脈絡與建築特色\n"
-            "### 建築風格與特色\n"
-            "### 歷史事件與背景\n"
-            "（必須以「#### {歷史時期/特徵}」作為四級子標題分組，每組下列條目必須採用「- {年份}：{歷史描述}」格式條列）\n\n"
-            "## 三、事實查核與可信度評級表（CL 1-5）\n"
-            "### 歷史數據查核結果\n"
-            "（必須包含表格：項目、報告記載內容、查核結果、佐證來源、CL 評級）\n"
-            "### AI 幻覺過濾檢測報告\n"
-            "### 整體可信度評級\n"
-            "（必須包含表格：評估維度、CL 評級、說明）\n\n"
-            "## 四、歷史檔案狀態宣告\n"
-            "### 可信性等級\n"
-            "### 歷史檔案（連結）\n"
-            "（由 CrewAI 研究員動態產出，必須為編號清單格式，每條連結嚴格採用 `[`CL {可信度評級}：{機構名稱}`](URL)` 格式，"
-            "並在清單上方加入引述區塊：> **以下歷史檔案連結由 CrewAI 官方檔案研究員動態產出，所有連結均經過驗證，指向香港特別行政區政府官方機構網域。**）\n\n"
-            "## 五、導賞員現場講稿\n"
-            "### 開場白\n"
-            "### 各站點\n"
-            "（每個站點以「### {站點名稱}」為三級標題，其下必須包含「#### 現場觀察重點」與「#### 歷史故事」兩個四級子標題）\n"
-            "### 結語\n\n"
-            "## 六、參考資料來源\n"
-            "### 官方檔案\n"
-            "（所有連結必須採用 Markdown 超連結格式 [`CL {可信度評級}：{機構名稱}`](URL)）\n"
-            "### 參考文獻清單\n\n"
-            "全篇使用專業繁體中文。歷史事件章節中的每一條目必須嚴格採用「{年份}：{歷史描述}」格式，並按「{歷史時期/特徵}」分組。"
-        ),
-        expected_output="結構完整的 Markdown 導賞手冊全文，嚴格遵循上述六大章節結構與子標題規範，歷史事件以「{年份}：{歷史描述}」格式按「{歷史時期/特徵}」分組，含 CrewAI 動態產出之 Markdown 歷史檔案超連結。",
+        description=_editor_task_description(),
+        expected_output=_editor_task_expected_output(),
         agent=editor
     )
 
     return [t1, t2, t3, t4]
+
+def _build_editor_task_with_context(editor_agent, inputs: dict, prior_outputs: list) -> Task:
+    """Build the editor task for the agent-4-only retry, with prior task outputs embedded as context."""
+    desc = _editor_task_description()
+
+    labels = [
+        "任務一（香港官方檔案研究員）",
+        "任務二（首席事實查核與信譽評估員）",
+        "任務三（文化導賞故事編劇）",
+    ]
+    context_parts = []
+    for label, raw in zip(labels, prior_outputs):
+        if raw and raw.strip():
+            context_parts.append(f"### {label} 輸出：\n{raw}")
+
+    if context_parts:
+        building_info = (
+            f"目標建築：{inputs.get('building_name', '')}"
+            f"（地址：{inputs.get('address', '')}，類別：{inputs.get('category', '')}）"
+        )
+        desc += (
+            f"\n\n---\n以下為目標建築資訊及前三個任務的已完成輸出，"
+            f"請直接基於這些內容進行編輯整合，無需重新研究：\n\n"
+            f"{building_info}\n\n" + "\n\n".join(context_parts)
+        )
+
+    return Task(
+        description=desc,
+        expected_output=_editor_task_expected_output(),
+        agent=editor_agent,
+    )
 
 # ==========================================
 # 3. Git 自動化控制
@@ -345,6 +580,12 @@ def main():
     (output_root / "法定古蹟").mkdir(parents=True, exist_ok=True)
     (output_root / "樓宇").mkdir(parents=True, exist_ok=True)
 
+    # === 環境變數檢查 ===
+    if not os.getenv("HKOAI_API_KEY"):
+        print("⚠️ 警告：HKOAI_API_KEY 未設定，優先模型將無法使用。")
+    if not os.getenv("OPENCODE_API_KEY"):
+        print("⚠️ 警告：OPENCODE_API_KEY 未設定，Fallback 模型將無法使用（優先模型失敗時將直接報錯）。")
+
     buildings = parse_and_sort_building_matrix()
     print(f"📋 共讀取到 {len(buildings)} 棟標的建築（已依編號 N 排序）。\n")
 
@@ -390,7 +631,8 @@ def main():
         completion = item["completion"]
 
         subdir = _category_to_subdir(category)
-        file_path = output_root / subdir / f"{n_id}-{b_name}.md"
+        safe_name = _sanitize_filename(b_name)
+        file_path = output_root / subdir / f"{n_id}-{safe_name}.md"
 
         print(f"--------------------------------------------------")
         print(f"🏗️ 正在處理 [編號 {item['N']}] {b_name} ({category}) | 狀態: {completion} -> 啟動 CrewAI...")
@@ -407,14 +649,15 @@ def main():
         try:
             content = execute_crew_with_fallback(build_agents, build_tasks, inputs)
         except Exception as e:
-            print(f"❌ [{b_name}] 生成失敗，跳過此建築。錯誤: {e}")
+            print(f"❌ [{b_name}] 所有嘗試均失敗，跳過此建築（狀態保持「未完成」）。")
+            _print_failure_diagnostics(e, attempt="N/A", max_attempts="N/A", inputs=inputs, model_label="所有模型", building_label=f"[編號 {item['N']}] {b_name}")
             continue
 
         with open(file_path, "w", encoding="utf-8") as f:
             f.write(content)
         print(f"📄 手冊已成功寫入: {file_path}")
 
-        updated_file = update_matrix_entry(item["N"], b_name, f"建築/{subdir}/{n_id}-{b_name}.md", item.get("_matrix_file"))
+        updated_file = update_matrix_entry(item["N"], b_name, f"建築/{subdir}/{n_id}-{safe_name}.md", item.get("_matrix_file"))
 
         auto_git_commit_and_push(str(file_path), b_name, n_id=n_id, credibility=credibility, matrix_file=updated_file, branch="dev-001")
         print(f"✨ [{b_name}] 處理完成！\n")

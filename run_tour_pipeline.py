@@ -15,6 +15,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import traceback
 from datetime import datetime
 from pathlib import Path
@@ -43,6 +44,25 @@ MATRIX_PATH = "導賞目標建築矩陣.md"
 MATRIX_DIR = "矩陣"
 BUILDING_DIR = "建築"
 MATRIX_FILE_ORDER = ["法定古蹟.md", "樓宇-市區.md", "樓宇-新界.md"]
+
+# 優先處理建築（以矩陣子檔案為鍵，值為該檔案內的 N 值集合）
+# 各子檔案 N 從 1 起獨立遞增
+_PRIORITY_BUILDINGS = {
+    "樓宇-新界.md": frozenset({
+        123, 489,
+        2519, 2720, 2821,
+        3268, 3269, 3270, 3271, 3272, 3273, 3292,
+        3382, 3516, 3822, 4028, 4320,
+        4433, 4434, 4435, 4443, 4444,
+        4846,
+        5112, 5154,
+        5843, 5847, 5907, 5908, 5909,
+        5910, 5911, 5912, 5913, 5914, 5915, 5916, 5917, 5918, 5919, 5920, 5921, 5922, 5923, 5924,
+        6157, 6294,
+        6796, 6797, 6903,
+        7582, 7594, 7600, 7653,
+    }),
+}
 
 def _category_to_subdir(category: str) -> str:
     """Map matrix category to handbook subdirectory name."""
@@ -576,6 +596,8 @@ def update_matrix_entry(n_value: str, building_name: str, link_url: str, matrix_
     return None
 
 def main():
+    priority_only = "--priority-only" in sys.argv
+
     output_root = Path(BUILDING_DIR)
     (output_root / "法定古蹟").mkdir(parents=True, exist_ok=True)
     (output_root / "樓宇").mkdir(parents=True, exist_ok=True)
@@ -589,30 +611,47 @@ def main():
     buildings = parse_and_sort_building_matrix()
     print(f"📋 共讀取到 {len(buildings)} 棟標的建築（已依編號 N 排序）。\n")
 
-    # === 啟動選單 TUI（在每次執行開頭詢問一次） ===
-    print("=" * 60)
-    print("🏛️ 香港導賞團自動化管線 - 啟動選單")
-    print("=" * 60)
-    print("  [1] 執行全部建築項目 (Run all buildings)")
-    print("  [2] 僅執行「🌚 未開始」項目 (Run only unstarted items)")
-    print("  [3] 離開程式 (Quit)")
-    print("-" * 60)
-
-    while True:
-        mode_choice = input("請選擇執行模式 [1/2/3]: ").strip()
-        if mode_choice in ['1', '2', '3']:
-            break
-        print("⚠️ 輸入無效，請重新輸入 1, 2 或 3。")
-
-    if mode_choice == '3':
-        print("🛑 使用者選擇離開。程式結束。")
-        return
-    elif mode_choice == '2':
-        target_buildings = [b for b in buildings if "未開始" in b["completion"]]
-        print(f"\n🔍 已過濾出 {len(target_buildings)} 個「🌚 未開始」的項目準備執行。")
+    if priority_only:
+        target_buildings = [
+            b for b in buildings
+            if os.path.basename(b.get("_matrix_file", "")) in _PRIORITY_BUILDINGS
+            and int(b["N"]) in _PRIORITY_BUILDINGS[os.path.basename(b["_matrix_file"])]
+        ]
+        print(f"🎯 --priority-only 模式：篩選出 {len(target_buildings)} 棟優先建築。")
     else:
-        target_buildings = buildings
-        print(f"\n⚡ 將依序批次執行全部共 {len(target_buildings)} 個建築項目。")
+        # === 啟動選單 TUI（在每次執行開頭詢問一次） ===
+        print("=" * 60)
+        print("🏛️ 香港導賞團自動化管線 - 啟動選單")
+        print("=" * 60)
+        print("  [1] 執行全部建築項目 (Run all buildings)")
+        print("  [2] 僅執行「🌚 未開始」項目 (Run only unstarted items)")
+        print("  [3] 優先建築先行，其後續接全部 (Priority first, then the rest)")
+        print("  [4] 離開程式 (Quit)")
+        print("-" * 60)
+
+        while True:
+            mode_choice = input("請選擇執行模式 [1/2/3/4]: ").strip()
+            if mode_choice in ['1', '2', '3', '4']:
+                break
+            print("⚠️ 輸入無效，請重新輸入 1, 2, 3 或 4。")
+
+        if mode_choice == '4':
+            print("🛑 使用者選擇離開。程式結束。")
+            return
+        elif mode_choice == '2':
+            target_buildings = [b for b in buildings if "未開始" in b["completion"]]
+            print(f"\n🔍 已過濾出 {len(target_buildings)} 個「🌚 未開始」的項目準備執行。")
+        elif mode_choice == '3':
+            def _is_priority(b):
+                mf = os.path.basename(b.get("_matrix_file", ""))
+                return mf in _PRIORITY_BUILDINGS and int(b["N"]) in _PRIORITY_BUILDINGS[mf]
+            priority = [b for b in buildings if _is_priority(b)]
+            rest = [b for b in buildings if not _is_priority(b)]
+            target_buildings = priority + rest
+            print(f"\n🎯 優先建築 {len(priority)} 棟先行，其餘 {len(rest)} 棟續接，共 {len(target_buildings)} 棟。")
+        else:
+            target_buildings = buildings
+            print(f"\n⚡ 將依序批次執行全部共 {len(target_buildings)} 個建築項目。")
 
     if not target_buildings:
         print("📭 目前沒有符合條件的建築需要處理。")

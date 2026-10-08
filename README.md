@@ -45,3 +45,11 @@ uv run python run_tour_pipeline.py 2>&1 | tee "tour-guide-research-$(date '+%Y%m
 - `uv run python run_tour_pipeline.py` — 以 `uv` 虛擬環境執行管線。
 - `2>&1` — 合併 stdout 與 stderr，確保錯誤訊息亦寫入日誌。
 - `| tee "..."` — 即時輸出至終端機，同時寫入帶時間戳的日誌檔案（例如 `tour-guide-research-20260108T143025.log`）。
+
+### 優先模式（僅處理指定建築）
+
+加入 `--priority-only` 旗標可跳過啟動選單 TUI，僅處理 `run_tour_pipeline.py` 中 `_PRIORITY_BUILDINGS` 所列的建築：
+
+```bash
+uv run python run_tour_pipeline.py --priority-only 2>&1 | tee "tour-guide-research-$(date '+%Y%m%dT%H%M%S').log"
+```

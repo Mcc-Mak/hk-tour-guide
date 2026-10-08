@@ -34,8 +34,7 @@
 
 > [!IMPORTANT]
 > 執行前必須設定以下環境變數：
-> - `HKOAI_API_KEY` — 香港政府 LLM 端點金鑰
-> - `OPENCODE_API_KEY` — Big Pickle (OpenCode-Zen) 備用模型金鑰
+> - `HKOAI_API_KEY` — 香港政府 LLM 端點金鑰（優先模型 GLM-5.2-FP8 + 備用模型 DeepSeek-V4-Flash-0731-Coding 共用）
 
 ```bash
 uv run python run_tour_pipeline.py 2>&1 | tee "tour-guide-research-$(date '+%Y%m%dT%H%M%S').log"

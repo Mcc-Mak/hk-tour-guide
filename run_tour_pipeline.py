@@ -114,11 +114,12 @@ def get_primary_llm() -> LLM:
     )
 
 def get_fallback_llm() -> LLM:
-    """初始化 Fallback 免費模型：OpenCode-Zen"""
+    """初始化 Fallback 模型：DeepSeek-V4-Flash-0731-Coding（同一 HKO 端點）"""
+    hko_api_key = os.getenv("HKOAI_API_KEY", "")
     return LLM(
-        model="openai/opencode-zen",
-        base_url="https://api.opencode.ai/v1",
-        api_key=os.getenv("OPENCODE_API_KEY", "free-tier"),
+        model="openai/deepseek-ai/DeepSeek-V4-Flash-0731-Coding",
+        base_url="https://litellm.services.hko.gov.hk",
+        api_key=hko_api_key if hko_api_key else "dummy_key",
         temperature=0.2,
         timeout=600,
         max_tokens=16000,
@@ -197,9 +198,9 @@ def execute_crew_with_fallback(agents_builder_func, tasks_builder_func, inputs: 
     第 1 次（正常）：完整 Crew，全部 Agent 使用 HKO/GLM-5.2-FP8。
     第 2 次（重試）：完整 Crew，全部 Agent 使用 HKO/GLM-5.2-FP8。
     第 3 次（特殊）：依偵測到的失敗 Agent 決定策略——
-      • Agent 1 失敗 → 重建完整 Crew，Agent 1+4 改用 Big Pickle (OpenCode-Zen)，Agent 2+3 續用 GLM-5.2-FP8。
-      • Agent 4 失敗 → 重用 Agent 1-3 之之輸出，僅以 Big Pickle 重跑 Agent 4。
-    Big Pickle 之任何失敗（連線、空內容、例外）均拋出 RuntimeError，由呼叫端 catch 後跳過此建築，不中斷管線。
+      • Agent 1 失敗 → 重建完整 Crew，Agent 1+4 改用 DeepSeek-V4-Flash，Agent 2+3 續用 GLM-5.2-FP8。
+      • Agent 4 失敗 → 重用 Agent 1-3 之之輸出，僅以 DeepSeek-V4-Flash 重跑 Agent 4。
+    DeepSeek-V4-Flash 之任何失敗（連線、空內容、例外）均拋出 RuntimeError，由呼叫端 catch 後跳過此建築，不中斷管線。
     """
     MAX_ATTEMPTS = 3
 
@@ -244,22 +245,22 @@ def execute_crew_with_fallback(agents_builder_func, tasks_builder_func, inputs: 
         print("⚠️ 優先模型連線測試未通過，跳過前兩次嘗試。")
         failed_idx = 0
 
-    # === 第 3 次嘗試：Big Pickle (OpenCode-Zen) 特殊重試 ===
-    oc_api_key = os.getenv("OPENCODE_API_KEY", "")
-    if not oc_api_key:
-        print("⚠️ OPENCODE_API_KEY 未設定，無法使用 Big Pickle 特殊重試。")
-        raise RuntimeError("❌ 優先模型 2 次嘗試均失敗，且 Big Pickle (OPENCODE_API_KEY) 不可用。")
+    # === 第 3 次嘗試：DeepSeek-V4-Flash 特殊重試 ===
+    hko_api_key = os.getenv("HKOAI_API_KEY", "")
+    if not hko_api_key:
+        print("⚠️ HKOAI_API_KEY 未設定，無法使用 DeepSeek-V4-Flash 特殊重試。")
+        raise RuntimeError("❌ 優先模型 2 次嘗試均失敗，且 HKOAI_API_KEY 不可用。")
 
-    print("🔄 啟動第 3 次特殊重試（Big Pickle / OpenCode-Zen）...")
+    print("🔄 啟動第 3 次特殊重試（DeepSeek-V4-Flash-0731-Coding）...")
 
     if not preflight_llm_check(
-        "openai/opencode-zen",
-        "https://api.opencode.ai/v1",
-        oc_api_key,
-        "OpenCode-Zen（Big Pickle）",
+        "openai/deepseek-ai/DeepSeek-V4-Flash-0731-Coding",
+        "https://litellm.services.hko.gov.hk",
+        hko_api_key,
+        "DeepSeek-V4-Flash-0731-Coding（Fallback）",
     ):
-        print("⚠️ Big Pickle 連線測試未通過。跳過此建築，管線繼續。")
-        raise RuntimeError("❌ Big Pickle 連線測試未通過。")
+        print("⚠️ DeepSeek-V4-Flash 連線測試未通過。跳過此建築，管線繼續。")
+        raise RuntimeError("❌ DeepSeek-V4-Flash 連線測試未通過。")
 
     fallback_llm = get_fallback_llm()
     primary_llm = primary_llm if primary_ok else get_primary_llm()
@@ -270,8 +271,8 @@ def execute_crew_with_fallback(agents_builder_func, tasks_builder_func, inputs: 
 
     try:
         if failed_idx == 3 and last_tasks is not None:
-            # --- Agent 4 失敗：重用 Agent 1-3 輸出，僅以 Big Pickle 重跑 Agent 4 ---
-            print("🔄 策略：Agent 4（導賞手冊總編輯）失敗，僅以 Big Pickle 重試 Agent 4...")
+            # --- Agent 4 失敗：重用 Agent 1-3 輸出，僅以 DeepSeek-V4-Flash 重跑 Agent 4 ---
+            print("🔄 策略：Agent 4（導賞手冊總編輯）失敗，僅以 DeepSeek-V4-Flash 重試 Agent 4...")
 
             prior_raws = []
             for i in range(3):
@@ -286,15 +287,15 @@ def execute_crew_with_fallback(agents_builder_func, tasks_builder_func, inputs: 
             result = crew.kickoff(inputs=inputs)
             content = str(result)
             if content and content.strip():
-                print("✅ Big Pickle Agent 4 重試成功！")
+                print("✅ DeepSeek-V4-Flash Agent 4 重試成功！")
                 return content
-            print("⚠️ Big Pickle Agent 4 重試返回空內容。")
-            raise RuntimeError("❌ Big Pickle Agent 4 重試返回空內容。")
+            print("⚠️ DeepSeek-V4-Flash Agent 4 重試返回空內容。")
+            raise RuntimeError("❌ DeepSeek-V4-Flash Agent 4 重試返回空內容。")
 
         else:
-            # --- Agent 1 失敗（或未知）：重建完整 Crew，Agent 1+4 用 Big Pickle ---
+            # --- Agent 1 失敗（或未知）：重建完整 Crew，Agent 1+4 用 DeepSeek-V4-Flash ---
             agent_label = failed_idx + 1 if failed_idx >= 0 else "?"
-            print(f"🔄 策略：Agent {agent_label} 失敗，重建完整 Crew（Agent 1+4 用 Big Pickle，Agent 2+3 用 GLM-5.2-FP8）...")
+            print(f"🔄 策略：Agent {agent_label} 失敗，重建完整 Crew（Agent 1+4 用 DeepSeek-V4-Flash，Agent 2+3 用 GLM-5.2-FP8）...")
 
             agents = agents_builder_func(
                 primary_llm,
@@ -306,16 +307,16 @@ def execute_crew_with_fallback(agents_builder_func, tasks_builder_func, inputs: 
             result = crew.kickoff(inputs=inputs)
             content = str(result)
             if content and content.strip():
-                print("✅ Big Pickle 混合 Crew 重試成功！")
+                print("✅ DeepSeek-V4-Flash 混合 Crew 重試成功！")
                 return content
-            print("⚠️ Big Pickle 混合 Crew 重試返回空內容。")
-            raise RuntimeError("❌ Big Pickle 混合 Crew 重試返回空內容。")
+            print("⚠️ DeepSeek-V4-Flash 混合 Crew 重試返回空內容。")
+            raise RuntimeError("❌ DeepSeek-V4-Flash 混合 Crew 重試返回空內容。")
 
     except RuntimeError:
         raise
     except Exception as e:
-        _print_failure_diagnostics(e, 3, MAX_ATTEMPTS, inputs, model_label="OpenCode-Zen (Big Pickle)")
-        raise RuntimeError(f"❌ Big Pickle 重試失敗：{e}") from e
+        _print_failure_diagnostics(e, 3, MAX_ATTEMPTS, inputs, model_label="DeepSeek-V4-Flash-0731-Coding (Fallback)")
+        raise RuntimeError(f"❌ DeepSeek-V4-Flash 重試失敗：{e}") from e
 
 # ==========================================
 # 2. 定義 CrewAI Agents 與 Tasks
@@ -609,9 +610,7 @@ def main():
 
     # === 環境變數檢查 ===
     if not os.getenv("HKOAI_API_KEY"):
-        print("⚠️ 警告：HKOAI_API_KEY 未設定，優先模型將無法使用。")
-    if not os.getenv("OPENCODE_API_KEY"):
-        print("⚠️ 警告：OPENCODE_API_KEY 未設定，Fallback 模型將無法使用（優先模型失敗時將直接報錯）。")
+        print("⚠️ 警告：HKOAI_API_KEY 未設定，優先模型與 Fallback 模型均將無法使用。")
 
     buildings = parse_and_sort_building_matrix()
     print(f"📋 共讀取到 {len(buildings)} 棟標的建築（已依編號 N 排序）。\n")

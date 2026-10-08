@@ -43,12 +43,12 @@ from crewai import Agent, Crew, Process, Task, LLM
 MATRIX_PATH = "導賞目標建築矩陣.md"
 MATRIX_DIR = "矩陣"
 BUILDING_DIR = "建築"
-MATRIX_FILE_ORDER = ["法定古蹟.md", "樓宇-市區.md", "樓宇-新界.md"]
+MATRIX_FILE_ORDER = ["法定古蹟/建築.md", "樓宇/市區建築.md", "樓宇/新界建築.md"]
 
 # 優先處理建築（以矩陣子檔案為鍵，值為該檔案內的 N 值集合）
 # 各子檔案 N 從 1 起獨立遞增
 _PRIORITY_BUILDINGS = {
-    "樓宇-新界.md": frozenset({
+    "新界建築.md": frozenset({
         123, 489,
         2519, 2720, 2821,
         3268, 3269, 3270, 3271, 3272, 3273, 3292,
@@ -64,11 +64,15 @@ _PRIORITY_BUILDINGS = {
     }),
 }
 
-def _category_to_subdir(category: str) -> str:
-    """Map matrix category to handbook subdirectory name."""
+def _category_to_subdir(category: str, matrix_file: str = None) -> str:
+    """Map matrix category to handbook subdirectory name.
+    For 樓宇, distinguish 市區 vs 新界 by matrix file basename."""
     if "法定古蹟" in category:
         return "法定古蹟"
-    return "樓宇"
+    basename = os.path.basename(matrix_file) if matrix_file else ""
+    if "新界" in basename:
+        return "樓宇/新界"
+    return "樓宇/市區"
 
 def _sanitize_filename(name: str) -> str:
     """將建築名稱清理為安全的檔名片段。
@@ -511,14 +515,14 @@ def auto_git_commit_and_push(file_path: str, building_name: str, n_id: str, cred
 def parse_and_sort_building_matrix(matrix_dir: str = MATRIX_DIR) -> list:
     """
     解析導賞目標建築矩陣（目錄樹結構）。
-    讀取 矩陣/ 目錄下所有 .md 子檔案（依固定順序：法定古蹟 → 樓宇-市區 → 樓宇-新界），
+    讀取 矩陣/ 目錄下所有 .md 子檔案（依固定順序：法定古蹟/建築 → 樓宇/市區建築 → 樓宇/新界建築），
     合併解析後依 (子檔案順序, 編號 N) 排序。
     各子檔案內 N 從 1 起獨立遞增（非全域唯一），以子目錄區分。
     """
     buildings = []
     matrix_files = [os.path.join(matrix_dir, f) for f in MATRIX_FILE_ORDER if os.path.exists(os.path.join(matrix_dir, f))]
     # Also pick up any unexpected .md files not in FILE_ORDER
-    extra = sorted(glob.glob(os.path.join(matrix_dir, "*.md")))
+    extra = sorted(glob.glob(os.path.join(matrix_dir, "**", "*.md"), recursive=True))
     for f in extra:
         if f not in matrix_files:
             matrix_files.append(f)
@@ -569,7 +573,7 @@ def update_matrix_entry(n_value: str, building_name: str, link_url: str, matrix_
     if matrix_file:
         search_files = [matrix_file]
     else:
-        search_files = sorted(glob.glob(os.path.join(MATRIX_DIR, "*.md")))
+        search_files = sorted(glob.glob(os.path.join(MATRIX_DIR, "**", "*.md"), recursive=True))
 
     for mf in search_files:
         if not os.path.exists(mf):
@@ -600,7 +604,8 @@ def main():
 
     output_root = Path(BUILDING_DIR)
     (output_root / "法定古蹟").mkdir(parents=True, exist_ok=True)
-    (output_root / "樓宇").mkdir(parents=True, exist_ok=True)
+    (output_root / "樓宇" / "市區").mkdir(parents=True, exist_ok=True)
+    (output_root / "樓宇" / "新界").mkdir(parents=True, exist_ok=True)
 
     # === 環境變數檢查 ===
     if not os.getenv("HKOAI_API_KEY"):
@@ -669,7 +674,7 @@ def main():
         credibility = item["credibility"]
         completion = item["completion"]
 
-        subdir = _category_to_subdir(category)
+        subdir = _category_to_subdir(category, item.get("_matrix_file"))
         safe_name = _sanitize_filename(b_name)
         file_path = output_root / subdir / f"{n_id}-{safe_name}.md"
 

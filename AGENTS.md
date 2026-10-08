@@ -57,7 +57,45 @@ Within section 二, historical events **must** be grouped under `#### {歷史時
 - Fallback: `opencode-zen` via `https://api.opencode.ai/v1`, env `OPENCODE_API_KEY`.
 - Pipeline tries primary, auto-falls back on failure. Both env vars must be set before running. Never commit these keys.
 - **SSL bypass:** `run_tour_pipeline.py` monkey-patches `httpx.Client`/`AsyncClient` to default `verify=False` (before `from crewai import ...`). This is required because the HKO endpoint certificate is not trusted by the system CA store in this sandbox. Equivalent of `NODE_TLS_REJECT_UNAUTHORIZED=0`.
-- **Timeout:** LLM timeout is 180s (not 60s) — GLM-5.2-FP8 uses reasoning tokens that require more time. Single CrewAI call takes ~48s.
+- **Timeout:** LLM timeout is 600s — GLM-5.2-FP8 uses reasoning tokens that require more time. Single CrewAI call takes ~48s.
+
+## LLM failure hypothesis & retry strategy (current)
+
+### Observed failure pattern (from `/tmp/tour-guide-research.log`, 149MB)
+
+Analysis of pipeline execution logs reveals a consistent pattern:
+
+- **Successes**: All 4 agents run in sequence (1→2→3→4), each appearing 3× in the log (12 total appearances = 1 success path through 4 agents × 3 crew-level retries when earlier buildings consumed retries). A successful building produces a handbook.
+- **Failures occur at only 2 points** — never at agents 2 or 3:
+  - **Agent 1 failure** (香港官方檔案研究員): GLM-5.2-FP8 returns `content=None` or empty string immediately. Affected buildings include 02336–02341 (all named 啟鑽苑, 6 duplicate-name entries), 02344, 02345. These fail across all 3 retries, suggesting a prompt-specific issue (likely the duplicate building name confusing the model, or the research prompt triggering a reasoning-token exhaustion that leaves `content` empty).
+  - **Agent 4 failure** (導賞手冊總編輯): Agents 1–3 succeed, but the editor agent — which has the longest and most structurally complex prompt (6-section Markdown template with nested subsections) — gets `content=None`. Affected buildings include pre-02330, 02334, 02347. The editor prompt's length and structural complexity likely cause GLM-5.2-FP8 to exhaust `max_tokens` on reasoning tokens, leaving no budget for `content`.
+- **Root cause hypothesis**: GLM-5.2-FP8 is a reasoning model. For certain prompts (long/complex like agent 4's, or involving duplicate names like agent 1's), the model spends its entire `max_tokens` budget on `reasoning_content` and returns an empty or None `content` field. CrewAI's `OpenAICompletion._handle_completion()` (line 2277) does `message.content or ""`, which becomes `""`, triggering the `ValueError("Invalid response from LLM call - None or empty.")` in `agent_utils.py` (lines 413-419, 537-543).
+- **Proof**: Direct OpenAI SDK calls with simple prompts return `message.content` properly populated (with `reasoning_content` also present). The issue only manifests with CrewAI's complex prompts (tools + multi-turn ReAct formatting + long structured system prompts).
+
+### Three-attempt retry strategy
+
+`execute_crew_with_fallback()` implements a 3-attempt strategy (replaces the old 3× GLM + full-crew fallback):
+
+| Attempt | Strategy | Agents | LLM |
+|---------|----------|--------|-----|
+| 1 (normal) | Full crew | All 4 | GLM-5.2-FP8 |
+| 2 (retry) | Full crew | All 4 | GLM-5.2-FP8 |
+| 3 (special) | Depends on which agent failed (see below) | | Big Pickle = OpenCode-Zen |
+
+**Attempt 3 special logic** (detected via `_detect_failed_agent()` which inspects `task.output` on each of the 4 tasks after a failed crew run):
+
+- **If Agent 1 (or unknown) failed**: Rebuild the **entire crew** with **mixed LLMs** — Agent 1 + Agent 4 use OpenCode-Zen ("big pickle"), Agent 2 + Agent 3 still use GLM-5.2-FP8. This is because a fresh crew run is needed (agent 1's output feeds all downstream agents).
+- **If Agent 4 failed**: **Reuse** the successful outputs from agents 1–3 (via `task.output.raw`), build a single editor task with those outputs embedded as context (`_build_editor_task_with_context()`), and run **only Agent 4** with OpenCode-Zen. This avoids redundant LLM calls on agents that already succeeded.
+
+**Failure safety**: If attempt 3 (big pickle) also fails — for any reason (quota exhaustion, connection failure, empty content, exception) — `execute_crew_with_fallback()` raises a `RuntimeError`. The main loop's `try/except` catches it and **continues to the next building** (`continue`). Big pickle failure **never breaks pipeline continuity**.
+
+### Key implementation details
+
+- `build_agents(llm, fallback_llm=None, fallback_indices=None)` — supports mixed LLMs. When `fallback_llm` and `fallback_indices` are provided, agents at those 0-based indices use `fallback_llm`; all others use `llm`.
+- `_AGENT_DEFS` — extracted agent role/goal/backstory definitions, used by `build_agents()`.
+- `_editor_task_description()` / `_editor_task_expected_output()` — extracted so both `build_tasks()` and `_build_editor_task_with_context()` share the same editor prompt.
+- `_build_editor_task_with_context(editor_agent, inputs, prior_outputs)` — builds a standalone editor task with agents 1–3 outputs embedded as context, for the agent-4-only retry.
+- `_detect_failed_agent(tasks)` — returns the 0-based index of the first task with no `output.raw`, or -1 if all have valid output.
 
 ## Content invariants (do not violate)
 

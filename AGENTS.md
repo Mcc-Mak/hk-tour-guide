@@ -33,7 +33,7 @@ There is no test suite, lint, or typecheck config yet — none should be assumed
 - `pyproject.toml` pins **`crewai==1.15.22`** (owner-confirmed). This version exports `LLM`, which `run_tour_pipeline.py` imports. The `verbose=` parameter on `Crew`/`Agent` is accepted (not removed) in 1.15.22 — no spec deviation needed.
 - **musllinux stub packages.** crewai 1.x transitively requires `lancedb`, `chromadb`, `onnxruntime`, and `google-re2`, none of which have musllinux wheels. The `_stubs/` directory contains local stub packages for all four. `pyproject.toml` declares them as direct deps and uses `[tool.uv.sources]` to redirect to the local paths. The stubs satisfy install-time resolution but raise `NotImplementedError` if called — safe because this project never uses crewai's Memory/RAG/Flow features. Pattern adapted from `/workplace/mcp/crewai-mcp-server/_stubs/`.
 - crewai 1.15.22 **installs and imports successfully** on this Alpine/musllinux sandbox. `from crewai import Agent, Crew, Process, Task, LLM` works. `run_tour_pipeline.py` imports cleanly. The parser smoke-test passes (20,210 buildings, correct Unicode-codepoint sort order, pipe-escaping verified).
-- Full pipeline *execution* (CrewAI crew kickoff with LLM calls) still requires both `HKOAI_API_KEY` and `OPENCODE_API_KEY` env vars to be set — see LLM configuration below.
+- Full pipeline *execution* (CrewAI crew kickoff with LLM calls) requires only `HKOAI_API_KEY` env var to be set — see LLM configuration below.
 
 ## Pipeline behavior gotcha
 
@@ -54,8 +54,8 @@ Within section 二, historical events **must** be grouped under `#### {歷史時
 ## LLM configuration (from spec, non-obvious)
 
 - Primary: `zai-org/GLM-5.2-FP8` via `https://litellm.services.hko.gov.hk`, env `HKOAI_API_KEY`.
-- Fallback: `opencode-zen` via `https://api.opencode.ai/v1`, env `OPENCODE_API_KEY`.
-- Pipeline tries primary, auto-falls back on failure. Both env vars must be set before running. Never commit these keys.
+- Fallback: `deepseek-ai/DeepSeek-V4-Flash-0731-Coding` via `https://litellm.services.hko.gov.hk` (same endpoint, same key). Replaced the previous OpenCode-Zen/Big Pickle fallback which was locked to the OpenCode app free tier and could not be called from an external script.
+- Pipeline tries primary (2×), auto-falls back on failure. Only `HKOAI_API_KEY` must be set. Never commit this keys.
 - **SSL bypass:** `run_tour_pipeline.py` monkey-patches `httpx.Client`/`AsyncClient` to default `verify=False` (before `from crewai import ...`). This is required because the HKO endpoint certificate is not trusted by the system CA store in this sandbox. Equivalent of `NODE_TLS_REJECT_UNAUTHORIZED=0`.
 - **Timeout:** LLM timeout is 600s — GLM-5.2-FP8 uses reasoning tokens that require more time. Single CrewAI call takes ~48s.
 
@@ -80,14 +80,14 @@ Analysis of pipeline execution logs reveals a consistent pattern:
 |---------|----------|--------|-----|
 | 1 (normal) | Full crew | All 4 | GLM-5.2-FP8 |
 | 2 (retry) | Full crew | All 4 | GLM-5.2-FP8 |
-| 3 (special) | Depends on which agent failed (see below) | | Big Pickle = OpenCode-Zen |
+| 3 (special) | Depends on which agent failed (see below) | | DeepSeek-V4-Flash-0731-Coding |
 
 **Attempt 3 special logic** (detected via `_detect_failed_agent()` which inspects `task.output` on each of the 4 tasks after a failed crew run):
 
-- **If Agent 1 (or unknown) failed**: Rebuild the **entire crew** with **mixed LLMs** — Agent 1 + Agent 4 use OpenCode-Zen ("big pickle"), Agent 2 + Agent 3 still use GLM-5.2-FP8. This is because a fresh crew run is needed (agent 1's output feeds all downstream agents).
-- **If Agent 4 failed**: **Reuse** the successful outputs from agents 1–3 (via `task.output.raw`), build a single editor task with those outputs embedded as context (`_build_editor_task_with_context()`), and run **only Agent 4** with OpenCode-Zen. This avoids redundant LLM calls on agents that already succeeded.
+- **If Agent 1 (or unknown) failed**: Rebuild the **entire crew** with **mixed LLMs** — Agent 1 + Agent 4 use DeepSeek-V4-Flash, Agent 2 + Agent 3 still use GLM-5.2-FP8. This is because a fresh crew run is needed (agent 1's output feeds all downstream agents).
+- **If Agent 4 failed**: **Reuse** the successful outputs from agents 1–3 (via `task.output.raw`), build a single editor task with those outputs embedded as context (`_build_editor_task_with_context()`), and run **only Agent 4** with DeepSeek-V4-Flash. This avoids redundant LLM calls on agents that already succeeded.
 
-**Failure safety**: If attempt 3 (big pickle) also fails — for any reason (quota exhaustion, connection failure, empty content, exception) — `execute_crew_with_fallback()` raises a `RuntimeError`. The main loop's `try/except` catches it and **continues to the next building** (`continue`). Big pickle failure **never breaks pipeline continuity**.
+**Failure safety**: If attempt 3 (DeepSeek-V4-Flash) also fails — for any reason (quota exhaustion, connection failure, empty content, exception) — `execute_crew_with_fallback()` raises a `RuntimeError`. The main loop's `try/except` catches it and **continues to the next building** (`continue`). DeepSeek-V4-Flash failure **never breaks pipeline continuity**.
 
 ### Key implementation details
 

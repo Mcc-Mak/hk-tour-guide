@@ -4,27 +4,53 @@
 
 ## 實體關係
 
-```
-┌───────────────────┐         ┌───────────────────────┐
-│  specbase/         │  links  │  .crewai/矩陣/         │
-│  導賞目標建築矩陣.md │────────→│  **/*.md (TOC 子檔案)  │
-│  (根索引檔)         │         │                       │
-└───────────────────┘         └───────────┬───────────┘
-                                          │
-                                          │ 1:N (編號 N)
-                                          ▼
-┌───────────────────┐         ┌───────────────────────┐
-│  codebase/建築/    │←────────│  矩陣 row (單棟建築)   │
-│  NN-名稱.md        │ 生成連結  │                       │
-│  (導賞手冊)         │────────→│                       │
-└───────────────────┘ 更新狀態  └───────────┬───────────┘
-                                          │
-                                          │ 資料來源
-                                          ▼
-                              ┌───────────────────────┐
-                              │  .crewai/data/*.json  │
-                              │  (開放資料原始檔)       │
-                              └───────────────────────┘
+```plantuml
+@startuml
+!theme plain
+skinparam linetype ortho
+
+entity "根索引檔\nspecbase/導賞目標建築矩陣.md" as Root {
+    *目錄結構表
+    *編號規則
+    *狀態圖例
+}
+
+entity "矩陣子檔案\n.crewai/矩陣/**/*.md" as MatrixFile {
+    *編號 {N} : integer
+    --
+    導賞專案類別
+    中文名稱
+    英文名稱
+    中文地址
+    英文地址
+    參考標籤
+    歷史檔案可信性
+    歷史檔案工作進度
+    歷史檔案（連結）
+}
+
+entity "導賞手冊\ncodebase/建築/NN-名稱.md" as Handbook {
+    *file_path : PK
+    --
+    n_id : FK
+    subdir
+    content (六段式結構)
+    model
+}
+
+entity "開放資料\n.crewai/data/*.json" as OpenData {
+    *source : PK
+    --
+    name_zh
+    name_en
+    address_zh
+    address_en
+}
+
+Root ||--o{ MatrixFile : "links (1:N)"
+MatrixFile ||--|| Handbook : "生成連結 + 更新狀態 (1:1)"
+OpenData ||--o{ MatrixFile : "資料來源 (1:N)"
+@enduml
 ```
 
 ## 實體定義

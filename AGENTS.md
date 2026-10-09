@@ -6,11 +6,39 @@ Guidance for OpenCode sessions working in this repo.
 
 Spec (`specbase/工作流程規格書.md`) is the **authoritative design**: read it in full before any work. Step 0 + pipeline files have been implemented per spec (`specbase/導賞目標建築矩陣.md`, `.crewai/矩陣/`, `.crewai/fetch_open_data.py`, `.crewai/run_tour_pipeline.py`, `.crewai/pyproject.toml`, `.crewai/_stubs/`, `.crewai/.crew/AGENTS.md`). `.crewai/requirements.txt` is superseded by `.crewai/pyproject.toml` (kept for spec traceability). The spec still governs any further changes — do not deviate from its file layout, agent roster, or output structure without owner consent.
 
+## Workflow (per session)
+
+Follow these steps **in order**:
+
+1. **Manage backlogs** — issues, sub-issues, milestones, labels, epics, user stories, tasks, and project boards. Triage and organise before writing code.
+2. **Update `specbase/`** — if the task requires spec changes, update the relevant spec file(s) first.
+3. **Implement** — write code in `.crewai/`, `.venv/`, and `codebase/` per the spec and task requirements.
+4. **Create/Update `codebase/docs/`** — maintain the following document set:
+   - `toc.md` — table of contents for the docs folder
+   - `charter.md` — project charter
+   - `user-stories.md` — user stories
+   - `srs.md` — software requirements specification
+   - `prd.md` — product requirements document
+   - `pdr.md` — preliminary design review
+   - `backend-api.md` — backend API documentation
+   - `db-schema.md` — database schema
+   - `erd.md` — entity-relationship diagram
+   - `quick-start.md` — quick start guide
+   - `cicd.md` — CI/CD documentation
+   - `setup.md` — setup guide
+   - `configuration.md` — configuration reference
+   - `rtm.md` — requirements traceability matrix
+   - `crm.md` — cross-reference matrix (cross-reference-matrix.md)
+5. **Update `CHANGELOG`** — version using `major.minor.patch` semantic versioning.
+6. **Git-control** — commit (good subject and body with version) → push to `origin/dev-001`.
+7. **Summarise** — provide a concise summary of what was done.
+
 ## Git
 
-- Working branch: `dev-001`. The planned pipeline hardcodes `push origin dev-001`; remote also has `main` and `dev`. Do not assume `main` is the active branch.
-- `origin` is a credential-less HTTPS remote (`https://Mcc-Mak@github.com/Mcc-Mak/hk-guided-tour.git`); auth is handled via a credential helper, not an embedded token. Do not embed tokens in the remote URL.
-- The planned `.crewai/run_tour_pipeline.py` auto-runs `git add` + `commit` + `push origin dev-001` after **each** generated handbook. Expect many automated commits on `dev-001`; do not be alarmed or rebase them away.
+- Working branch: `dev-001`. The pipeline auto-pushes to `origin/dev-001`; remote also has `main` and `dev` (auto-merged via CI/CD).
+- `origin` is `https://Mcc-Mak@github.com/Mcc-Mak/hk-tour-guide.git` (credential-less HTTPS; auth via credential helper).
+- `.crewai/run_tour_pipeline.py` auto-runs `git add` + `commit` + `push origin dev-001` after **each** generated handbook. Expect many automated commits on `dev-001`; do not be alarmed or rebase them away.
+- CI/CD (`.github/workflows/ci-cd.yml`) auto-merges `dev-001` → `dev` → `main` on push, runs CodeQL + SonarQube gates, and supports manual `workflow_dispatch` for mdBook build + GitHub Pages deploy.
 
 ## Planned architecture (from spec)
 
@@ -24,7 +52,8 @@ Python + CrewAI. Core dependency is `crewai` (pinned in `.crewai/pyproject.toml`
   - `.crewai/矩陣/樓宇/市區建築.md` — 12,381 rows (RVD Urban, N=1–12,381)
   - `.crewai/矩陣/樓宇/新界建築.md` — 7,656 rows (RVD NT, N=1–7,656)
   - Total: **20,210 buildings**. 21 CSDI monuments also in RVD are excluded from RVD to avoid duplicates. Markdown table cells with `|` characters are escaped as `\|`.
-- `codebase/site/` — mdBook site configuration (`book.toml`, `scripts/build_mdbook.py`, `theme/`). GitHub Pages deployment is currently disabled (`.github/workflows/deploy-mdbook.yml` has only `workflow_dispatch` trigger).
+- `codebase/site/` — mdBook site configuration (`book.toml`, `scripts/build_mdbook.py`, `theme/`). GitHub Pages deploy via manual `workflow_dispatch` only (blocked by CodeQL + SonarQube gates).
+- `codebase/docs/` — project documentation set (charter, user-stories, srs, prd, pdr, backend-api, db-schema, erd, quick-start, cicd, setup, configuration, rtm, crm, toc).
 
 There is no test suite, lint, or typecheck config yet — none should be assumed.
 
@@ -56,7 +85,7 @@ Within section 二, historical events **must** be grouped under `#### {歷史時
 
 - Primary: `zai-org/GLM-5.2-FP8` via `https://litellm.services.hko.gov.hk`, env `HKOAI_API_KEY`.
 - Fallback: `deepseek-ai/DeepSeek-V4-Flash-0731-Coding` via `https://litellm.services.hko.gov.hk` (same endpoint, same key). Replaced the previous OpenCode-Zen/Big Pickle fallback which was locked to the OpenCode app free tier and could not be called from an external script.
-- Pipeline tries primary (2×), auto-falls back on failure. Only `HKOAI_API_KEY` must be set. Never commit this keys.
+- Pipeline tries primary (2×), auto-falls back on failure. Only `HKOAI_API_KEY` must be set. Never commit this key.
 - **SSL bypass:** `.crewai/run_tour_pipeline.py` monkey-patches `httpx.Client`/`AsyncClient` to default `verify=False` (before `from crewai import ...`). This is required because the HKO endpoint certificate is not trusted by the system CA store in this sandbox. Equivalent of `NODE_TLS_REJECT_UNAUTHORIZED=0`.
 - **Timeout:** LLM timeout is 600s — GLM-5.2-FP8 uses reasoning tokens that require more time. Single CrewAI call takes ~48s.
 

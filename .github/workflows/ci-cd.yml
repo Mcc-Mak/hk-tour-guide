@@ -46,6 +46,52 @@ jobs:
           git merge origin/dev --no-ff --allow-unrelated-histories -m "Auto-merge dev into main"
           git push origin main
 
+  codeql:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: python
+          config: |
+            paths-ignore:
+              - .crewai/_stubs
+              - __pycache__
+              - '**/site-packages/**'
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:python"
+
+  sonarqube:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v4
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+
   build:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
@@ -80,7 +126,7 @@ jobs:
 
   deploy:
     if: github.event_name == 'workflow_dispatch'
-    needs: build
+    needs: [build, codeql, sonarqube]
     runs-on: ubuntu-latest
     permissions:
       pages: write

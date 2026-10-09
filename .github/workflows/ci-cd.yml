@@ -15,23 +15,22 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  auto_merge_dev_001_to_dev:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/dev-001'
+  auto_merge:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout dev
+      - name: Checkout
         uses: actions/checkout@v5
         with:
-          ref: dev
           fetch-depth: 0
-          token: ${{ secrets.GIT_PUSH_TOKEN }}
 
       - name: Configure git
         run: |
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
 
-      - name: Auto-merge dev-001 into dev
+      - name: Merge dev-001 into dev
+        if: github.ref == 'refs/heads/dev-001'
         run: |
           git fetch origin dev dev-001
           git checkout dev
@@ -39,23 +38,7 @@ jobs:
           git merge origin/dev-001 --no-ff -m "Auto-merge dev-001 into dev"
           git push origin dev
 
-  auto_merge_dev_to_main:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout main
-        uses: actions/checkout@v5
-        with:
-          ref: main
-          fetch-depth: 0
-          token: ${{ secrets.GIT_PUSH_TOKEN }}
-
-      - name: Configure git
-        run: |
-          git config user.name "GitHub Actions"
-          git config user.email "actions@github.com"
-
-      - name: Auto-merge dev into main
+      - name: Merge dev into main
         run: |
           git fetch origin main dev
           git checkout main
@@ -73,7 +56,6 @@ jobs:
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
-          token: ${{ secrets.GIT_PUSH_TOKEN }}
 
       - name: Setup Python
         uses: actions/setup-python@v5

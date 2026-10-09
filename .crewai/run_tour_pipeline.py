@@ -174,19 +174,6 @@ def _print_failure_diagnostics(exc: Exception, attempt, max_attempts, inputs: di
         print(f"    {line}")
     print("=" * 60)
 
-def _detect_failed_agent(tasks: list) -> int:
-    """Detect the 0-based index of the first task whose agent failed (no usable output).
-
-    Returns the index (0–3), or -1 if all tasks have valid non-empty output.
-    """
-    for i, task in enumerate(tasks):
-        output = getattr(task, "output", None)
-        raw = getattr(output, "raw", None) if output else None
-        if raw is None or not str(raw).strip():
-            return i
-    return -1
-
-
 def execute_crew_with_fallback(agents_builder_func, tasks_builder_func, inputs: dict) -> tuple[str, str]:
     """執行 CrewAI 任務，採用三階段重試策略。
 
@@ -293,25 +280,16 @@ _AGENT_DEFS = [
     ),
 ]
 
-def build_agents(llm: LLM, fallback_llm: LLM = None, fallback_indices: frozenset = None):
-    """Build the 4 CrewAI agents.
-
-    If *fallback_llm* and *fallback_indices* are provided, agents at those
-    0-based indices use *fallback_llm*; all others use *llm*.
-    """
-    fallback_indices = fallback_indices or frozenset()
-
-    def _llm_for(idx: int) -> LLM:
-        return fallback_llm if idx in fallback_indices else llm
-
+def build_agents(llm: LLM):
+    """Build the 4 CrewAI agents."""
     agents = []
-    for idx, adef in enumerate(_AGENT_DEFS):
+    for adef in _AGENT_DEFS:
         agents.append(
             Agent(
                 role=adef["role"],
                 goal=adef["goal"],
                 backstory=adef["backstory"],
-                llm=_llm_for(idx),
+                llm=llm,
                 verbose=True,
                 max_retry_limit=0,
             )
@@ -394,37 +372,6 @@ def build_tasks(agents, inputs: dict):
     )
 
     return [t1, t2, t3, t4]
-
-def _build_editor_task_with_context(editor_agent, inputs: dict, prior_outputs: list) -> Task:
-    """Build the editor task for the agent-4-only retry, with prior task outputs embedded as context."""
-    desc = _editor_task_description()
-
-    labels = [
-        "任務一（香港官方檔案研究員）",
-        "任務二（首席事實查核與信譽評估員）",
-        "任務三（文化導賞故事編劇）",
-    ]
-    context_parts = []
-    for label, raw in zip(labels, prior_outputs):
-        if raw and raw.strip():
-            context_parts.append(f"### {label} 輸出：\n{raw}")
-
-    if context_parts:
-        building_info = (
-            f"目標建築：{inputs.get('building_name', '')}"
-            f"（地址：{inputs.get('address', '')}，類別：{inputs.get('category', '')}）"
-        )
-        desc += (
-            f"\n\n---\n以下為目標建築資訊及前三個任務的已完成輸出，"
-            f"請直接基於這些內容進行編輯整合，無需重新研究：\n\n"
-            f"{building_info}\n\n" + "\n\n".join(context_parts)
-        )
-
-    return Task(
-        description=desc,
-        expected_output=_editor_task_expected_output(),
-        agent=editor_agent,
-    )
 
 # ==========================================
 # 3. Git 自動化控制
@@ -659,7 +606,7 @@ def main():
             f.write(content)
         print(f"📄 手冊已成功寫入: {file_path}")
 
-        updated_file = update_matrix_entry(item["N"], b_name, f"建築/{subdir}/{n_id}-{safe_name}.md", item.get("_matrix_file"))
+        updated_file = update_matrix_entry(item["N"], b_name, f"codebase/建築/{subdir}/{n_id}-{safe_name}.md", item.get("_matrix_file"))
 
         auto_git_commit_and_push(str(file_path), b_name, n_id=n_id, credibility=credibility, matrix_file=updated_file, branch="dev-001", model=model_used)
         print(f"✨ [{b_name}] 處理完成！\n")

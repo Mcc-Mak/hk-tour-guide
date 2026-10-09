@@ -1,0 +1,24 @@
+[book]
+title = "香港建築導賞手冊"
+language = "zh-Hant"
+src = "book-src"
+authors = ["香港導賞團"]
+
+[output.html]
+default-theme = "light"
+preferred-dark-theme = "navy"
+git-repository-url = "https://github.com/Mcc-Mak/hk-guided-tour"
+edit-url-template = "https://github.com/Mcc-Mak/hk-guided-tour/edit/main/{path}"
+additional-css = ["theme/cjk.css"]
+additional-js = ["theme/sidebar.js"]
+no-section-label = false
+
+[output.html.search]
+enable = true
+limit-results = 30
+use-boolean-and = true
+boost-title = 2
+boost-hierarchy = 1
+boost-paragraph = 1
+expand = true
+heading-split-level = 3

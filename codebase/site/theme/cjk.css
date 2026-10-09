@@ -1,0 +1,184 @@
+/* CJK 字體優化 — 繁體中文顯示 */
+
+:root {
+  --cjk-font-family: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei",
+    "Heiti TC", "LiHei Pro", "微軟正黑體", "新細明體", sans-serif;
+  --cjk-serif-family: "Noto Serif TC", "Songti TC", "SimSun", "宋體", serif;
+}
+
+body {
+  font-family: var(--cjk-font-family), -apple-system, BlinkMacSystemFont,
+    "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  line-height: 1.8;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--cjk-font-family), -apple-system, BlinkMacSystemFont,
+    "Segoe UI", Roboto, sans-serif;
+  font-weight: 600;
+}
+
+/* 表格行高加大，提升 CJK 可讀性 */
+table tr td, table tr th {
+  line-height: 1.7;
+  padding: 8px 12px;
+}
+
+/* 導賞手冊中的建築基本資料表格 */
+table {
+  overflow-wrap: anywhere;
+}
+
+/* 側邊欄 CJK 斷行優化 */
+.sidebar-scrollbox .chapter {
+  word-break: break-all;
+}
+
+/* 內容區塊字體大小 */
+.content p, .content li {
+  font-size: 16px;
+}
+
+/* 程式碼區塊保持等寬字體 */
+code, pre {
+  font-family: "JetBrains Mono", "Fira Code", "Source Code Pro", Consolas,
+    "Courier New", monospace;
+}
+
+/*
+ * hljs 修正 — mdBook 載入三套 highlight.js 主題 CSS（base / tomorrow-night / ayu），
+ * 透過 JS 切換 <link> 的 disabled 屬性。但以下問題導致跨主題顯示異常：
+ *
+ * 1. ayu-highlight.css 在 .hljs 設 background:#191f26 — 即使非 ayu 主題，
+ *    規則仍在 DOM 中（僅 disabled），部分瀏覽器/狀態下仍套用，導致行內 code 暗底。
+ * 2. mdBook 的 chrome.css 對 pre 僅設 position:relative，無背景/padding，
+ *    純文字 code block（無語言標記）不產生 .hljs class → 完全無樣式。
+ * 3. 行內 code 使用 :not(pre) > .hljs（非 :not(pre) > code），需同時涵蓋。
+ */
+
+/* --- 行內 code：涵蓋 code 與 .hljs 兩種 selector --- */
+:not(pre) > code,
+:not(pre) > .hljs {
+  display: inline;
+  padding: 0.2em 0.4em;
+  border-radius: 4px;
+  font-size: 0.9em;
+  background: var(--inline-code-bg, rgba(0, 0, 0, 0.07));
+  color: var(--inline-code-color, inherit);
+  overflow-x: initial;
+}
+
+/* --- 程式碼區塊容器 pre：跨主題一致背景與 padding --- */
+pre {
+  padding: 14px 18px;
+  border-radius: 6px;
+  overflow-x: auto;
+  line-height: 1.5;
+  background: var(--code-block-bg, #f6f8fa);
+}
+
+pre code,
+pre .hljs {
+  display: block;
+  padding: 0;
+  background: transparent;
+  font-size: 14px;
+  color: inherit;
+  overflow-x: auto;
+}
+
+/* --- 暗色主題（coal / navy / ayu）--- */
+.coal pre,
+.navy pre,
+.ayu pre {
+  --code-block-bg: #1e1e1e;
+}
+
+.coal :not(pre) > code,
+.coal :not(pre) > .hljs,
+.navy :not(pre) > code,
+.navy :not(pre) > .hljs,
+.ayu :not(pre) > code,
+.ayu :not(pre) > .hljs {
+  --inline-code-bg: rgba(255, 255, 255, 0.1);
+  --inline-code-color: #e0e0e0;
+}
+
+/* --- rust 主題（暖色系）--- */
+.rust pre {
+  --code-block-bg: #f5ede0;
+}
+
+.rust :not(pre) > code,
+.rust :not(pre) > .hljs {
+  --inline-code-bg: rgba(150, 80, 0, 0.1);
+}
+
+/* --- 導賞手冊索引頁：有序清單隱藏編號，改顯示 NNNNN 前綴 --- */
+#mdbook-content > main > ol {
+  list-style-type: none;
+  padding-left: 0;
+  counter-reset: none;
+}
+
+/* --- 隱藏 mdBook 自動編號，改用手動層級編號 --- */
+.chapter-item strong[aria-hidden="true"] {
+  display: none;
+}
+
+/* --- 香港建築導賞 intro link：粗體底線 --- */
+ol.chapter > li.chapter-item:first-child .chapter-link-wrapper > a {
+  font-weight: 700;
+  text-decoration: underline;
+}
+
+/* --- 側邊欄子項目縮排 --- */
+ol.section > li.chapter-item {
+  margin-left: 1em;
+}
+
+/* --- 側邊欄摺疊/展開切換按鈕 --- */
+.chapter-item:has(> .sidebar-toggle) {
+  margin-left: 1em;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  align-items: baseline;
+}
+
+.chapter-item:has(> .sidebar-toggle) > .sidebar-toggle {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.chapter-item:has(> .sidebar-toggle) > .chapter-link-wrapper {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.chapter-item:has(> .sidebar-toggle) > ol.section {
+  grid-column: 1 / -1;
+  grid-row: 2;
+}
+
+.sidebar-toggle {
+  cursor: pointer;
+  user-select: none;
+  display: inline-block;
+  width: 1.2em;
+  text-align: center;
+  flex-shrink: 0;
+  transition: transform 0.15s ease;
+}
+
+.chapter-item.collapsed > ol.section {
+  display: none;
+}
+
+.chapter-item > .sidebar-toggle::before {
+  content: "\25BE";
+}
+
+.chapter-item.collapsed > .sidebar-toggle::before {
+  content: "\25B8";
+}

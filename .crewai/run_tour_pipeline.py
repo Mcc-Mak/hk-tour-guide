@@ -40,9 +40,11 @@ httpx.AsyncClient.__init__ = _patched_async_client_init
 
 from crewai import Agent, Crew, Process, Task, LLM
 
-MATRIX_PATH = "導賞目標建築矩陣.md"
-MATRIX_DIR = "矩陣"
-BUILDING_DIR = "建築"
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+MATRIX_PATH = "specbase/導賞目標建築矩陣.md"
+MATRIX_DIR = ".crewai/矩陣"
+BUILDING_DIR = "codebase/建築"
 MATRIX_FILE_ORDER = ["法定古蹟/建築.md", "樓宇/市區建築.md", "樓宇/新界建築.md"]
 
 # 優先處理建築（以矩陣子檔案為鍵，值為該檔案內的 N 值集合）
@@ -547,6 +549,8 @@ def update_matrix_entry(n_value: str, building_name: str, link_url: str, matrix_
     return None
 
 def main():
+    os.chdir(REPO_ROOT)
+
     priority_only = "--priority-only" in sys.argv
     priority_first = "--priority-first" in sys.argv
 

@@ -2,6 +2,19 @@
 
 本專案遵循 [Semantic Versioning](https://semver.org/)。
 
+## [0.5.0] — 2026-10-09
+
+### Changed
+- `codebase/` 文件集重組：14 份專案文件（charter, user-stories, srs, prd, pdr, backend-api, db-schema, erd, quick-start, cicd, setup, configuration, rtm, crm）由 `codebase/` 遷移至 `codebase/docs/`
+- `codebase/toc.md` 連結路徑同步更新
+- `AGENTS.md` 文件路徑更新（`codebase/X.md` → `codebase/docs/X.md`）
+- `specbase/工作流程規格書.md` 檔案結構樹新增 `docs/` 子目錄
+- `specbase/導賞目標建築矩陣.md` 目錄結構新增 `docs/` 子目錄
+- `codebase/site/scripts/build_mdbook.py` 註解路徑修正
+
+### Added
+- GitHub issue #26「完成所有建築首次導賞手冊生成」— 20,210 棟建築導賞手冊生成追蹤
+
 ## [0.4.0] — 2026-10-09
 
 ### Fixed

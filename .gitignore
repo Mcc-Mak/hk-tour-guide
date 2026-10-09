@@ -1,3 +1,7 @@
 __pycache__/
 *.pyc
-tour-guide-research-*.log
+.venv/
+
+# mdBook build artifacts
+codebase/site/book-src/
+codebase/site/book/

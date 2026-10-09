@@ -13,22 +13,22 @@ Follow these steps **in order**:
 1. **Manage backlogs** — issues, sub-issues, milestones, labels, epics, user stories, tasks, and project boards. Triage and organise before writing code.
 2. **Update `specbase/`** — if the task requires spec changes, update the relevant spec file(s) first.
 3. **Implement** — write code in `.crewai/`, `.venv/`, and `codebase/` per the spec and task requirements.
-4. **Create/Update `codebase/docs/`** — maintain the following document set:
-   - `toc.md` — table of contents for the docs folder
-   - `charter.md` — project charter
-   - `user-stories.md` — user stories
-   - `srs.md` — software requirements specification
-   - `prd.md` — product requirements document
-   - `pdr.md` — preliminary design review
-   - `backend-api.md` — backend API documentation
-   - `db-schema.md` — database schema
-   - `erd.md` — entity-relationship diagram
-   - `quick-start.md` — quick start guide
-   - `cicd.md` — CI/CD documentation
-   - `setup.md` — setup guide
-   - `configuration.md` — configuration reference
-   - `rtm.md` — requirements traceability matrix
-   - `crm.md` — cross-reference matrix (cross-reference-matrix.md)
+4. **Create/Update `codebase/`** — maintain the following document set:
+   - `codebase/toc.md` — table of contents for the docs set
+   - `codebase/charter.md` — project charter
+   - `codebase/user-stories.md` — user stories
+   - `codebase/srs.md` — software requirements specification
+   - `codebase/prd.md` — product requirements document
+   - `codebase/pdr.md` — preliminary design review
+   - `codebase/backend-api.md` — backend API documentation
+   - `codebase/db-schema.md` — database schema
+   - `codebase/erd.md` — entity-relationship diagram
+   - `codebase/quick-start.md` — quick start guide
+   - `codebase/cicd.md` — CI/CD documentation
+   - `codebase/setup.md` — setup guide
+   - `codebase/configuration.md` — configuration reference
+   - `codebase/rtm.md` — requirements traceability matrix
+   - `codebase/crm.md` — cross-reference matrix
 5. **Update `CHANGELOG`** — version using `major.minor.patch` semantic versioning.
 6. **Git-control** — commit (good subject and body with version) → push to `origin/dev-001`.
 7. **Summarise** — provide a concise summary of what was done.
@@ -53,7 +53,7 @@ Python + CrewAI. Core dependency is `crewai` (pinned in `.crewai/pyproject.toml`
   - `.crewai/矩陣/樓宇/新界建築.md` — 7,656 rows (RVD NT, N=1–7,656)
   - Total: **20,210 buildings**. 21 CSDI monuments also in RVD are excluded from RVD to avoid duplicates. Markdown table cells with `|` characters are escaped as `\|`.
 - `codebase/site/` — mdBook site configuration (`book.toml`, `scripts/build_mdbook.py`, `theme/`). GitHub Pages deploy via manual `workflow_dispatch` only (blocked by CodeQL + SonarQube gates).
-- `codebase/docs/` — project documentation set (charter, user-stories, srs, prd, pdr, backend-api, db-schema, erd, quick-start, cicd, setup, configuration, rtm, crm, toc).
+- `codebase/` — project documentation set: `toc.md`, `charter.md`, `user-stories.md`, `srs.md`, `prd.md`, `pdr.md`, `backend-api.md`, `db-schema.md`, `erd.md`, `quick-start.md`, `cicd.md`, `setup.md`, `configuration.md`, `rtm.md`, `crm.md`.
 
 There is no test suite, lint, or typecheck config yet — none should be assumed.
 

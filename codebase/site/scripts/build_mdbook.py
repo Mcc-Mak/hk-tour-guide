@@ -2,7 +2,7 @@
 """Generate mdBook source directory from matrix files and existing handbooks.
 
 Scans 矩陣/*.md for building metadata, matches against existing handbook files
-in 建築/, and generates a clean book-src/ directory with:
+in codebase/建築/, and generates a clean book-src/ directory with:
   - SUMMARY.md (sidebar/TOC)
   - intro.md (landing page, modified from 導賞目標建築矩陣.md)
   - Category index pages (lightweight link lists)
@@ -91,7 +91,7 @@ def split_matrix_row(line: str) -> list:
 def extract_link_path(link_cell: str) -> str | None:
     """Extract the file path from a 歷史檔案（連結） cell.
 
-    Expected format: [`歷史檔案（連結）`](建築/...)
+    Expected format: [`歷史檔案（連結）`](codebase/建築/...)
     The path itself may contain parentheses (e.g. 00018-侯王古廟(九龍城).md),
     so we greedily match up to the final .md).
     """

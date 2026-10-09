@@ -581,7 +581,7 @@ def main():
             mf = os.path.basename(b.get("_matrix_file", ""))
             return mf in _PRIORITY_BUILDINGS and int(b["N"]) in _PRIORITY_BUILDINGS[mf]
         priority = [b for b in buildings if _is_priority(b)]
-        rest = [b for b in buildings if not _is_priority(b)]
+        rest = [b for b in buildings if not _is_priority(b) and "已完成" not in b["completion"]]
         target_buildings = priority + rest
         print(f"🎯 --priority-first 模式：優先建築 {len(priority)} 棟先行，其餘 {len(rest)} 棟續接，共 {len(target_buildings)} 棟。")
     else:
@@ -612,7 +612,7 @@ def main():
                 mf = os.path.basename(b.get("_matrix_file", ""))
                 return mf in _PRIORITY_BUILDINGS and int(b["N"]) in _PRIORITY_BUILDINGS[mf]
             priority = [b for b in buildings if _is_priority(b)]
-            rest = [b for b in buildings if not _is_priority(b)]
+            rest = [b for b in buildings if not _is_priority(b) and "已完成" not in b["completion"]]
             target_buildings = priority + rest
             print(f"\n🎯 優先建築 {len(priority)} 棟先行，其餘 {len(rest)} 棟續接，共 {len(target_buildings)} 棟。")
         else:

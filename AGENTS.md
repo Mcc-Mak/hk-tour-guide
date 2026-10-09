@@ -80,22 +80,11 @@ Analysis of pipeline execution logs reveals a consistent pattern:
 |---------|----------|--------|-----|
 | 1 (normal) | Full crew | All 4 | GLM-5.2-FP8 |
 | 2 (retry) | Full crew | All 4 | GLM-5.2-FP8 |
-| 3 (special) | Depends on which agent failed (see below) | | DeepSeek-V4-Flash-0731-Coding |
+| 3 (fallback) | Full crew | All 4 | DeepSeek-V4-Flash-0731-Coding |
 
-**Attempt 3 special logic** (detected via `_detect_failed_agent()` which inspects `task.output` on each of the 4 tasks after a failed crew run):
-
-- **If Agent 1 (or unknown) failed**: Rebuild the **entire crew** with **mixed LLMs** — Agent 1 + Agent 4 use DeepSeek-V4-Flash, Agent 2 + Agent 3 still use GLM-5.2-FP8. This is because a fresh crew run is needed (agent 1's output feeds all downstream agents).
-- **If Agent 4 failed**: **Reuse** the successful outputs from agents 1–3 (via `task.output.raw`), build a single editor task with those outputs embedded as context (`_build_editor_task_with_context()`), and run **only Agent 4** with DeepSeek-V4-Flash. This avoids redundant LLM calls on agents that already succeeded.
+**Attempt 3 logic**: Rebuild the **entire crew** with **all 4 agents** using DeepSeek-V4-Flash-0731-Coding (same HKO endpoint, same `HKOAI_API_KEY`). No mixed LLMs, no agent-failure detection — just a clean full-crew retry with a different model.
 
 **Failure safety**: If attempt 3 (DeepSeek-V4-Flash) also fails — for any reason (quota exhaustion, connection failure, empty content, exception) — `execute_crew_with_fallback()` raises a `RuntimeError`. The main loop's `try/except` catches it and **continues to the next building** (`continue`). DeepSeek-V4-Flash failure **never breaks pipeline continuity**.
-
-### Key implementation details
-
-- `build_agents(llm, fallback_llm=None, fallback_indices=None)` — supports mixed LLMs. When `fallback_llm` and `fallback_indices` are provided, agents at those 0-based indices use `fallback_llm`; all others use `llm`.
-- `_AGENT_DEFS` — extracted agent role/goal/backstory definitions, used by `build_agents()`.
-- `_editor_task_description()` / `_editor_task_expected_output()` — extracted so both `build_tasks()` and `_build_editor_task_with_context()` share the same editor prompt.
-- `_build_editor_task_with_context(editor_agent, inputs, prior_outputs)` — builds a standalone editor task with agents 1–3 outputs embedded as context, for the agent-4-only retry.
-- `_detect_failed_agent(tasks)` — returns the 0-based index of the first task with no `output.raw`, or -1 if all have valid output.
 
 ## Content invariants (do not violate)
 

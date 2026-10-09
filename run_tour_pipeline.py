@@ -197,9 +197,7 @@ def execute_crew_with_fallback(agents_builder_func, tasks_builder_func, inputs: 
 
     第 1 次（正常）：完整 Crew，全部 Agent 使用 HKO/GLM-5.2-FP8。
     第 2 次（重試）：完整 Crew，全部 Agent 使用 HKO/GLM-5.2-FP8。
-    第 3 次（特殊）：依偵測到的失敗 Agent 決定策略——
-      • Agent 1 失敗 → 重建完整 Crew，Agent 1+4 改用 DeepSeek-V4-Flash，Agent 2+3 續用 GLM-5.2-FP8。
-      • Agent 4 失敗 → 重用 Agent 1-3 之之輸出，僅以 DeepSeek-V4-Flash 重跑 Agent 4。
+    第 3 次（Fallback）：完整 Crew，全部 Agent 改用 DeepSeek-V4-Flash-0731-Coding。
     DeepSeek-V4-Flash 之任何失敗（連線、空內容、例外）均拋出 RuntimeError，由呼叫端 catch 後跳過此建築，不中斷管線。
     """
     MAX_ATTEMPTS = 3
@@ -213,9 +211,6 @@ def execute_crew_with_fallback(agents_builder_func, tasks_builder_func, inputs: 
         "HKO/GLM-5.2-FP8（優先模型）",
     )
 
-    failed_idx = -1
-    last_tasks = None
-
     # === 第 1、2 次嘗試：完整 Crew + GLM-5.2-FP8 ===
     if primary_ok:
         primary_llm = get_primary_llm()
@@ -225,7 +220,6 @@ def execute_crew_with_fallback(agents_builder_func, tasks_builder_func, inputs: 
             try:
                 agents = agents_builder_func(primary_llm)
                 tasks = tasks_builder_func(agents, inputs)
-                last_tasks = tasks
                 crew = Crew(agents=agents, tasks=tasks, process=Process.sequential, verbose=True)
                 result = crew.kickoff(inputs=inputs)
                 content = str(result)
@@ -233,25 +227,18 @@ def execute_crew_with_fallback(agents_builder_func, tasks_builder_func, inputs: 
                     print(f"✅ HKO/GLM-5.2-FP8 執行成功！（第 {attempt} 次嘗試）")
                     return content
                 print(f"⚠️ 第 {attempt} 次嘗試返回空內容。")
-                if last_tasks:
-                    failed_idx = _detect_failed_agent(last_tasks)
             except Exception as e:
                 _print_failure_diagnostics(e, attempt, MAX_ATTEMPTS, inputs, model_label="HKO/GLM-5.2-FP8")
-                if last_tasks:
-                    failed_idx = _detect_failed_agent(last_tasks)
-                    print(f"🔍 偵測到失敗的 Agent 索引：{failed_idx}（0-3，-1=無法判定）")
         print(f"⚠️ 優先模型已嘗試 2 次均失敗。")
     else:
         print("⚠️ 優先模型連線測試未通過，跳過前兩次嘗試。")
-        failed_idx = 0
 
-    # === 第 3 次嘗試：DeepSeek-V4-Flash 特殊重試 ===
-    hko_api_key = os.getenv("HKOAI_API_KEY", "")
+    # === 第 3 次嘗試：完整 Crew + DeepSeek-V4-Flash ===
     if not hko_api_key:
-        print("⚠️ HKOAI_API_KEY 未設定，無法使用 DeepSeek-V4-Flash 特殊重試。")
+        print("⚠️ HKOAI_API_KEY 未設定，無法使用 DeepSeek-V4-Flash Fallback。")
         raise RuntimeError("❌ 優先模型 2 次嘗試均失敗，且 HKOAI_API_KEY 不可用。")
 
-    print("🔄 啟動第 3 次特殊重試（DeepSeek-V4-Flash-0731-Coding）...")
+    print("🔄 啟動第 3 次 Fallback（完整 Crew，全部 Agent 使用 DeepSeek-V4-Flash-0731-Coding）...")
 
     if not preflight_llm_check(
         "openai/deepseek-ai/DeepSeek-V4-Flash-0731-Coding",
@@ -263,54 +250,18 @@ def execute_crew_with_fallback(agents_builder_func, tasks_builder_func, inputs: 
         raise RuntimeError("❌ DeepSeek-V4-Flash 連線測試未通過。")
 
     fallback_llm = get_fallback_llm()
-    primary_llm = primary_llm if primary_ok else get_primary_llm()
-
-    if failed_idx < 0:
-        failed_idx = 0
-        print("⚠️ 無法明確判定失敗的 Agent，預設為 Agent 1（索引 0）。")
 
     try:
-        if failed_idx == 3 and last_tasks is not None:
-            # --- Agent 4 失敗：重用 Agent 1-3 輸出，僅以 DeepSeek-V4-Flash 重跑 Agent 4 ---
-            print("🔄 策略：Agent 4（導賞手冊總編輯）失敗，僅以 DeepSeek-V4-Flash 重試 Agent 4...")
-
-            prior_raws = []
-            for i in range(3):
-                output = getattr(last_tasks[i], "output", None)
-                raw = getattr(output, "raw", None) if output else None
-                prior_raws.append(str(raw) if raw else "")
-
-            editor_agent = agents_builder_func(fallback_llm)[3]
-            editor_task = _build_editor_task_with_context(editor_agent, inputs, prior_raws)
-
-            crew = Crew(agents=[editor_agent], tasks=[editor_task], process=Process.sequential, verbose=True)
-            result = crew.kickoff(inputs=inputs)
-            content = str(result)
-            if content and content.strip():
-                print("✅ DeepSeek-V4-Flash Agent 4 重試成功！")
-                return content
-            print("⚠️ DeepSeek-V4-Flash Agent 4 重試返回空內容。")
-            raise RuntimeError("❌ DeepSeek-V4-Flash Agent 4 重試返回空內容。")
-
-        else:
-            # --- Agent 1 失敗（或未知）：重建完整 Crew，Agent 1+4 用 DeepSeek-V4-Flash ---
-            agent_label = failed_idx + 1 if failed_idx >= 0 else "?"
-            print(f"🔄 策略：Agent {agent_label} 失敗，重建完整 Crew（Agent 1+4 用 DeepSeek-V4-Flash，Agent 2+3 用 GLM-5.2-FP8）...")
-
-            agents = agents_builder_func(
-                primary_llm,
-                fallback_llm=fallback_llm,
-                fallback_indices=frozenset({0, 3}),
-            )
-            tasks = tasks_builder_func(agents, inputs)
-            crew = Crew(agents=agents, tasks=tasks, process=Process.sequential, verbose=True)
-            result = crew.kickoff(inputs=inputs)
-            content = str(result)
-            if content and content.strip():
-                print("✅ DeepSeek-V4-Flash 混合 Crew 重試成功！")
-                return content
-            print("⚠️ DeepSeek-V4-Flash 混合 Crew 重試返回空內容。")
-            raise RuntimeError("❌ DeepSeek-V4-Flash 混合 Crew 重試返回空內容。")
+        agents = agents_builder_func(fallback_llm)
+        tasks = tasks_builder_func(agents, inputs)
+        crew = Crew(agents=agents, tasks=tasks, process=Process.sequential, verbose=True)
+        result = crew.kickoff(inputs=inputs)
+        content = str(result)
+        if content and content.strip():
+            print("✅ DeepSeek-V4-Flash 執行成功！")
+            return content
+        print("⚠️ DeepSeek-V4-Flash 執行返回空內容。")
+        raise RuntimeError("❌ DeepSeek-V4-Flash 執行返回空內容。")
 
     except RuntimeError:
         raise
@@ -602,6 +553,7 @@ def update_matrix_entry(n_value: str, building_name: str, link_url: str, matrix_
 
 def main():
     priority_only = "--priority-only" in sys.argv
+    priority_first = "--priority-first" in sys.argv
 
     output_root = Path(BUILDING_DIR)
     (output_root / "法定古蹟").mkdir(parents=True, exist_ok=True)
@@ -622,6 +574,14 @@ def main():
             and int(b["N"]) in _PRIORITY_BUILDINGS[os.path.basename(b["_matrix_file"])]
         ]
         print(f"🎯 --priority-only 模式：篩選出 {len(target_buildings)} 棟優先建築。")
+    elif priority_first:
+        def _is_priority(b):
+            mf = os.path.basename(b.get("_matrix_file", ""))
+            return mf in _PRIORITY_BUILDINGS and int(b["N"]) in _PRIORITY_BUILDINGS[mf]
+        priority = [b for b in buildings if _is_priority(b)]
+        rest = [b for b in buildings if not _is_priority(b)]
+        target_buildings = priority + rest
+        print(f"🎯 --priority-first 模式：優先建築 {len(priority)} 棟先行，其餘 {len(rest)} 棟續接，共 {len(target_buildings)} 棟。")
     else:
         # === 啟動選單 TUI（在每次執行開頭詢問一次） ===
         print("=" * 60)

@@ -404,7 +404,245 @@ def auto_git_commit_and_push(file_path: str, building_name: str, n_id: str, cred
     run_git_command(["push", "origin", branch])
 
 # ==========================================
-# 4. 主流程 (含解析、排序與啟動選單 TUI)
+# 4. GitHub 議題與專案看板管理
+# ==========================================
+
+PROJECT_BOARD_ID = "PVT_kwHOBWs32c4BmUTy"
+PROJECT_STATUS_FIELD_ID = "PVTSSF_lAHOBWs32c4BmUTyzhk91TM"
+PROJECT_STATUS_TODO = "f75ad846"
+PROJECT_STATUS_IN_PROGRESS = "47fc9ee4"
+PROJECT_STATUS_DONE = "98236657"
+
+BATCH_SIZE = 250
+
+_SUBISSUE_OFFSETS = {
+    "法定古蹟": 26,
+    "樓宇/市區": 27,
+    "樓宇/新界": 77,
+}
+
+_CATEGORY_TOTALS = {
+    "法定古蹟": 173,
+    "樓宇/市區": 12381,
+    "樓宇/新界": 7656,
+}
+
+_CAT_FULL_NAME = {
+    "法定古蹟": "法定古蹟",
+    "樓宇/市區": "樓宇（市區）",
+    "樓宇/新界": "樓宇（新界）",
+}
+
+_GH_AVAILABLE = None
+
+
+def _check_gh() -> bool:
+    global _GH_AVAILABLE
+    if _GH_AVAILABLE is None:
+        result = subprocess.run(["gh", "--version"], capture_output=True, text=True, timeout=10)
+        _GH_AVAILABLE = (result.returncode == 0)
+    return _GH_AVAILABLE
+
+
+def _run_gh(args: list, timeout: int = 30) -> tuple:
+    try:
+        result = subprocess.run(["gh"] + args, capture_output=True, text=True, timeout=timeout)
+        return result.returncode, result.stdout.strip(), result.stderr.strip()
+    except Exception as e:
+        return 1, "", str(e)
+
+
+def _run_gh_graphql(query: str, timeout: int = 30) -> dict | None:
+    try:
+        result = subprocess.run(
+            ["gh", "api", "graphql", "-f", f"query={query}"],
+            capture_output=True, text=True, timeout=timeout
+        )
+        if result.returncode != 0:
+            return None
+        return json.loads(result.stdout)
+    except Exception:
+        return None
+
+
+def _get_batch_info(subdir: str, n_value: int) -> tuple:
+    """Determine batch number, sub-issue number, and N range for a building.
+
+    Returns: (batch_num, subissue_num, start_n, end_n, batch_total)
+    """
+    total = _CATEGORY_TOTALS.get(subdir, 0)
+    if total == 0:
+        return 0, 0, 0, 0, 0
+    batch_num = (n_value - 1) // BATCH_SIZE + 1
+    start_n = (batch_num - 1) * BATCH_SIZE + 1
+    end_n = min(batch_num * BATCH_SIZE, total)
+    batch_total = end_n - start_n + 1
+    offset = _SUBISSUE_OFFSETS.get(subdir, 0)
+    subissue_num = offset + batch_num
+    return batch_num, subissue_num, start_n, end_n, batch_total
+
+
+def init_batch_progress(buildings: list) -> dict:
+    """Initialize batch progress dict from parsed buildings list.
+
+    Returns: {(subdir, batch_num): done_count}
+    """
+    progress = {}
+    for b in buildings:
+        b_subdir = _category_to_subdir(b["category"], b.get("_matrix_file"))
+        n = int(b["N"])
+        batch_num, _, _, _, _ = _get_batch_info(b_subdir, n)
+        if batch_num == 0:
+            continue
+        key = (b_subdir, batch_num)
+        if key not in progress:
+            progress[key] = 0
+        if "已完成" in b["completion"]:
+            progress[key] += 1
+    return progress
+
+
+def update_batch_subissue(subissue_num: int, subdir: str, batch_num: int,
+                          start_n: int, end_n: int, done: int, total: int) -> None:
+    """Update the batch sub-issue body with current progress on GitHub."""
+    remaining = total - done
+    cat_full = _CAT_FULL_NAME.get(subdir, subdir)
+
+    if remaining == 0:
+        status = "✅ 已完成"
+    elif done > 0:
+        status = "🔄 進行中"
+    else:
+        status = "⬜ 未開始"
+
+    body = (
+        f"| 項目 | 值 |\n"
+        f"|------|------|\n"
+        f"| 分類 | {cat_full} |\n"
+        f"| 批次 | {batch_num:02d} |\n"
+        f"| 編號範圍 | N={start_n:05d}–{end_n:05d} |\n"
+        f"| 總數 | {total} |\n"
+        f"| 已完成 | {done} |\n"
+        f"| 剩餘 | {remaining} |\n"
+        f"| 狀態 | {status} |\n"
+        f"\n"
+        f"## 分類模型統計\n"
+        f"\n"
+        f"| 模型 | 已完成數 | 占比 |\n"
+        f"|------|---------|------|\n"
+        f"| GLM-5.2-FP8 | （不詳） | — |\n"
+        f"| DeepSeek-V4-Flash-0731-Coding | （不詳） | — |\n"
+        f"| **合計** | **{done}** | — |\n"
+        f"\n"
+        f"父議題：#26"
+    )
+
+    rc, _, err = _run_gh(["issue", "edit", str(subissue_num), "--body", body])
+    if rc != 0:
+        print(f"⚠️ 無法更新子議題 #{subissue_num}: {err}")
+    else:
+        print(f"📋 子議題 #{subissue_num} 已更新（{done}/{total}）")
+
+    if remaining == 0:
+        rc2, _, err2 = _run_gh(["issue", "close", str(subissue_num), "--reason", "completed"])
+        if rc2 != 0:
+            print(f"⚠️ 無法關閉子議題 #{subissue_num}: {err2}")
+        else:
+            print(f"✅ 子議題 #{subissue_num} 已關閉（批次完成）")
+
+
+def _ensure_project_board_item(subissue_num: int) -> str | None:
+    """Ensure sub-issue is on the project board. Returns project item node ID or None."""
+    query = (
+        '{\n'
+        f'  repository(owner: "Mcc-Mak", name: "hk-tour-guide") {{\n'
+        f'    issue(number: {subissue_num}) {{\n'
+        '      id\n'
+        '      projectItems(first: 5) {\n'
+        '        nodes { id project { id } }\n'
+        '      }\n'
+        '    }\n'
+        '  }\n'
+        '}'
+    )
+    data = _run_gh_graphql(query)
+    if not data:
+        return None
+    issue_data = data.get("data", {}).get("repository", {}).get("issue", {})
+    if not issue_data:
+        return None
+
+    for item in issue_data.get("projectItems", {}).get("nodes", []):
+        if item.get("project", {}).get("id") == PROJECT_BOARD_ID:
+            return item["id"]
+
+    issue_id = issue_data.get("id")
+    if not issue_id:
+        return None
+
+    mutation = (
+        'mutation {\n'
+        f'  addProjectV2ItemById(input: {{\n'
+        f'    projectId: "{PROJECT_BOARD_ID}"\n'
+        f'    contentId: "{issue_id}"\n'
+        '  }) {\n'
+        '    item { id }\n'
+        '  }\n'
+        '}'
+    )
+    data = _run_gh_graphql(mutation)
+    if data and "data" in data:
+        return data["data"]["addProjectV2ItemById"]["item"]["id"]
+    return None
+
+
+def update_project_board_status(item_id: str, status_option_id: str) -> bool:
+    """Update the Status field of a project board item."""
+    mutation = (
+        'mutation {\n'
+        f'  updateProjectV2ItemFieldValue(input: {{\n'
+        f'    projectId: "{PROJECT_BOARD_ID}"\n'
+        f'    itemId: "{item_id}"\n'
+        f'    fieldId: "{PROJECT_STATUS_FIELD_ID}"\n'
+        f'    value: {{ singleSelectOptionId: "{status_option_id}" }}\n'
+        '  }) {\n'
+        '    projectV2Item { id }\n'
+        '  }\n'
+        '}'
+    )
+    data = _run_gh_graphql(mutation)
+    return data is not None and "errors" not in data
+
+
+def sync_batch_to_github(subdir: str, n_value: int, batch_progress: dict) -> None:
+    """Sync batch sub-issue body and project board status to GitHub.
+
+    Non-blocking: all failures are logged but do not interrupt the pipeline.
+    """
+    if not _check_gh():
+        return
+
+    try:
+        batch_num, subissue_num, start_n, end_n, batch_total = _get_batch_info(subdir, n_value)
+        if batch_num == 0 or subissue_num < 27 or subissue_num > 108:
+            return
+
+        done = batch_progress.get((subdir, batch_num), 0)
+
+        update_batch_subissue(subissue_num, subdir, batch_num, start_n, end_n, done, batch_total)
+
+        item_id = _ensure_project_board_item(subissue_num)
+        if item_id:
+            if done >= batch_total:
+                update_project_board_status(item_id, PROJECT_STATUS_DONE)
+            elif done > 0:
+                update_project_board_status(item_id, PROJECT_STATUS_IN_PROGRESS)
+    except Exception as e:
+        print(f"⚠️ 子議題同步失敗（不影響管線）: {e}")
+
+
+# ==========================================
+# 5. 主流程 (含解析、排序與啟動選單 TUI)
 # ==========================================
 
 
@@ -569,6 +807,9 @@ def main():
 
     print("=" * 60 + "\n")
 
+    # === 初始化批次進度追蹤 ===
+    batch_progress = init_batch_progress(buildings)
+
     # === 批次自動化執行迴圈 ===
     for item in target_buildings:
         n_id = str(int(item["N"])).zfill(5)
@@ -609,6 +850,14 @@ def main():
         updated_file = update_matrix_entry(item["N"], b_name, f"codebase/建築/{subdir}/{n_id}-{safe_name}.md", item.get("_matrix_file"))
 
         auto_git_commit_and_push(str(file_path), b_name, n_id=n_id, credibility=credibility, matrix_file=updated_file, branch="dev-001", model=model_used)
+
+        b_n = int(item["N"])
+        batch_num, _, _, _, _ = _get_batch_info(subdir, b_n)
+        if batch_num > 0:
+            key = (subdir, batch_num)
+            batch_progress[key] = batch_progress.get(key, 0) + 1
+            sync_batch_to_github(subdir, b_n, batch_progress)
+
         print(f"✨ [{b_name}] 處理完成！\n")
 
     print("\n🎉 選定的所有導賞手冊均已成功透過 CrewAI 動態生成 Markdown 檔案連結並提交至 Git！")

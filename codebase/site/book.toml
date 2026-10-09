@@ -7,8 +7,8 @@ authors = ["香港導賞團"]
 [output.html]
 default-theme = "light"
 preferred-dark-theme = "navy"
-git-repository-url = "https://github.com/Mcc-Mak/hk-guided-tour"
-edit-url-template = "https://github.com/Mcc-Mak/hk-guided-tour/edit/main/{path}"
+git-repository-url = "https://github.com/Mcc-Mak/hk-tour-guide"
+edit-url-template = "https://github.com/Mcc-Mak/hk-tour-guide/edit/main/{path}"
 additional-css = ["theme/cjk.css"]
 additional-js = ["theme/sidebar.js"]
 no-section-label = false

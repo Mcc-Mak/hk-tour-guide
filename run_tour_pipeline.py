@@ -2,7 +2,7 @@
 """
 香港導賞團自動化生成管線（含前端啟動 TUI 與 CrewAI Markdown 連結輸出）
 - 多代理人協作 (CrewAI)
-- LLM 優先調用 HKO/GLM-5.2-FP8，失敗時自動 Fallback 至 OpenCode-Zen
+- LLM 優先調用 HKO/GLM-5.2-FP8，失敗時自動 Fallback 至 DeepSeek-V4-Flash-0731-Coding
 - 支援 5 位數編號檔案命名 (例如 00001-建築名稱.md)
 - 內建矩陣排序 (導賞專案類別 -> 中文名稱 -> 中文地址)
 - 啟動選單 TUI：於程式執行初期詢問整體執行範圍（全部執行 / 僅未開始項目 / 離開）
@@ -192,13 +192,15 @@ def _detect_failed_agent(tasks: list) -> int:
     return -1
 
 
-def execute_crew_with_fallback(agents_builder_func, tasks_builder_func, inputs: dict) -> str:
+def execute_crew_with_fallback(agents_builder_func, tasks_builder_func, inputs: dict) -> tuple[str, str]:
     """執行 CrewAI 任務，採用三階段重試策略。
 
     第 1 次（正常）：完整 Crew，全部 Agent 使用 HKO/GLM-5.2-FP8。
     第 2 次（重試）：完整 Crew，全部 Agent 使用 HKO/GLM-5.2-FP8。
     第 3 次（Fallback）：完整 Crew，全部 Agent 改用 DeepSeek-V4-Flash-0731-Coding。
     DeepSeek-V4-Flash 之任何失敗（連線、空內容、例外）均拋出 RuntimeError，由呼叫端 catch 後跳過此建築，不中斷管線。
+
+    Returns: (content, model_label) — model_label 標識實際產出手冊的模型。
     """
     MAX_ATTEMPTS = 3
 
@@ -225,7 +227,7 @@ def execute_crew_with_fallback(agents_builder_func, tasks_builder_func, inputs: 
                 content = str(result)
                 if content and content.strip():
                     print(f"✅ HKO/GLM-5.2-FP8 執行成功！（第 {attempt} 次嘗試）")
-                    return content
+                    return content, "HKO/GLM-5.2-FP8 (zai-org/GLM-5.2-FP8)"
                 print(f"⚠️ 第 {attempt} 次嘗試返回空內容。")
             except Exception as e:
                 _print_failure_diagnostics(e, attempt, MAX_ATTEMPTS, inputs, model_label="HKO/GLM-5.2-FP8")
@@ -259,7 +261,7 @@ def execute_crew_with_fallback(agents_builder_func, tasks_builder_func, inputs: 
         content = str(result)
         if content and content.strip():
             print("✅ DeepSeek-V4-Flash 執行成功！")
-            return content
+            return content, "DeepSeek-V4-Flash-0731-Coding (deepseek-ai/DeepSeek-V4-Flash-0731-Coding)"
         print("⚠️ DeepSeek-V4-Flash 執行返回空內容。")
         raise RuntimeError("❌ DeepSeek-V4-Flash 執行返回空內容。")
 
@@ -440,7 +442,7 @@ def run_git_command(args: list):
     else:
         print(f" Git: git {' '.join(args)}")
 
-def auto_git_commit_and_push(file_path: str, building_name: str, n_id: str, credibility: str, matrix_file: str = None, branch: str = "dev-001"):
+def auto_git_commit_and_push(file_path: str, building_name: str, n_id: str, credibility: str, matrix_file: str = None, branch: str = "dev-001", model: str = "HKO/GLM-5.2-FP8 (zai-org/GLM-5.2-FP8)"):
     print(f"📦 對 {file_path} 進行版本控制...")
     git_add_args = ["add", file_path]
     if matrix_file:
@@ -452,7 +454,7 @@ def auto_git_commit_and_push(file_path: str, building_name: str, n_id: str, cred
         f"檔案路徑：{file_path}\n"
         f"矩陣編號：{n_id}\n"
         f"可信性等級：{credibility}\n"
-        f"模型：HKO/GLM-5.2-FP8 (zai-org/GLM-5.2-FP8)\n"
+        f"模型：{model}\n"
         f"結構：六段式標準章節 + CL 評級表 + 動態歷史檔案連結\n"
         f"矩陣狀態：🌕 已完成"
     )
@@ -650,7 +652,7 @@ def main():
         }
 
         try:
-            content = execute_crew_with_fallback(build_agents, build_tasks, inputs)
+            content, model_used = execute_crew_with_fallback(build_agents, build_tasks, inputs)
         except Exception as e:
             print(f"❌ [{b_name}] 所有嘗試均失敗，跳過此建築（狀態保持「未完成」）。")
             _print_failure_diagnostics(e, attempt="N/A", max_attempts="N/A", inputs=inputs, model_label="所有模型", building_label=f"[編號 {item['N']}] {b_name}")
@@ -662,7 +664,7 @@ def main():
 
         updated_file = update_matrix_entry(item["N"], b_name, f"建築/{subdir}/{n_id}-{safe_name}.md", item.get("_matrix_file"))
 
-        auto_git_commit_and_push(str(file_path), b_name, n_id=n_id, credibility=credibility, matrix_file=updated_file, branch="dev-001")
+        auto_git_commit_and_push(str(file_path), b_name, n_id=n_id, credibility=credibility, matrix_file=updated_file, branch="dev-001", model=model_used)
         print(f"✨ [{b_name}] 處理完成！\n")
 
     print("\n🎉 選定的所有導賞手冊均已成功透過 CrewAI 動態生成 Markdown 檔案連結並提交至 Git！")

@@ -35,7 +35,7 @@ jobs:
           git fetch origin dev dev-001
           git checkout dev
           git reset --hard origin/dev
-          git merge origin/dev-001 --no-ff -m "Auto-merge dev-001 into dev"
+          git merge origin/dev-001 --no-ff --allow-unrelated-histories -m "Auto-merge dev-001 into dev"
           git push origin dev
 
       - name: Merge dev into main
@@ -43,7 +43,7 @@ jobs:
           git fetch origin main dev
           git checkout main
           git reset --hard origin/main
-          git merge origin/dev --no-ff -m "Auto-merge dev into main"
+          git merge origin/dev --no-ff --allow-unrelated-histories -m "Auto-merge dev into main"
           git push origin main
 
   build:

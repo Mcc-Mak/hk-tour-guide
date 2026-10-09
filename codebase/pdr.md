@@ -2,44 +2,73 @@
 
 ## 1. 系統架構
 
+### 1.1 管線架構
+
+```mermaid
+flowchart TB
+    subgraph pipeline["run_tour_pipeline.py"]
+        A["矩陣解析 (TOC 樹)"] --> B["啟動選單 TUI (4 種模式)"]
+        B --> C["批次執行迴圈"]
+        C --> D["execute_crew_with_fallback()"]
+        D --> E1["Agent 1: 研究員"]
+        E1 --> E2["Agent 2: 查核員"]
+        E2 --> E3["Agent 3: 編劇"]
+        E3 --> E4["Agent 4: 總編輯"]
+        E4 --> F1["寫入手冊 NN-名稱.md"]
+        E4 --> F2["更新矩陣 狀態+連結"]
+        E4 --> F3["Git push dev-001"]
+    end
 ```
-┌─────────────────────────────────────────────────────┐
-│                   run_tour_pipeline.py               │
-│                                                       │
-│  ┌─────────────┐  ┌──────────────┐  ┌─────────────┐ │
-│  │  矩陣解析    │→│  啟動選單 TUI  │→│  批次執行迴圈 │ │
-│  │  (TOC 樹)   │  │  (4 種模式)   │  │             │ │
-│  └─────────────┘  └──────────────┘  └──────┬──────┘ │
-│                                            │         │
-│                    ┌───────────────────────┘         │
-│                    ▼                                 │
-│  ┌─────────────────────────────────────────────────┐ │
-│  │         execute_crew_with_fallback()            │ │
-│  │                                                   │ │
-│  │  Attempt 1-2: GLM-5.2-FP8 (full crew)           │ │
-│  │  Attempt 3:   DeepSeek-V4-Flash (full crew)     │ │
-│  │                                                   │ │
-│  │  ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐   │ │
-│  │  │Agent 1 │→│Agent 2 │→│Agent 3 │→│Agent 4 │   │ │
-│  │  │研究員   │ │查核員   │ │編劇    │ │總編輯   │   │ │
-│  │  └────────┘ └────────┘ └────────┘ └────────┘   │ │
-│  └─────────────────────────────────────────────────┘ │
-│                    │                                 │
-│         ┌─────────┼──────────┐                      │
-│         ▼         ▼          ▼                      │
-│  ┌──────────┐ ┌────────┐ ┌──────────┐              │
-│  │ 寫入手冊  │ │更新矩陣│ │Git push  │              │
-│  │ NN-名稱.md│ │狀態+連結│ │dev-001   │              │
-│  └──────────┘ └────────┘ └──────────┘              │
-└─────────────────────────────────────────────────────┘
-         │
-         ▼  (GitHub Actions CI/CD)
-┌─────────────────────────────────────────────────────┐
-│  dev-001 ──merge──→ dev ──merge──→ main             │
-│  CodeQL ──┐                                         │
-│  SonarQube┤──→ deploy (manual workflow_dispatch)    │
-│  build ───┘    → GitHub Pages                       │
-└─────────────────────────────────────────────────────┘
+
+### 1.2 LLM 備援策略
+
+```mermaid
+flowchart LR
+    D["execute_crew_with_fallback()"]
+    D -->|"Attempt 1-2"| GLM["GLM-5.2-FP8 (完整 Crew)"]
+    GLM -->|"失敗"| DS["Attempt 3: DeepSeek-V4-Flash (完整 Crew)"]
+    GLM -->|"成功"| OK1["回傳 content"]
+    DS -->|"成功"| OK2["回傳 content"]
+    DS -->|"失敗"| SKIP["RuntimeError → 跳過此建築"]
+```
+
+### 1.3 CI/CD 流程
+
+```plantuml
+@startuml
+!theme plain
+skinparam componentStyle rectangle
+
+package "GitHub Actions CI/CD" {
+    component "auto_merge" as AM
+    component "codeql" as CQ
+    component "sonarqube" as SQ
+    component "build" as BD
+    component "deploy" as DP
+
+    AM : dev-001 → dev → main
+    CQ : CodeQL 安全分析
+    SQ : SonarQube 品質掃描
+    BD : mdBook 建置
+    DP : GitHub Pages 部署
+}
+
+cloud "push to dev-001" as push
+push --> AM
+push --> CQ
+push --> SQ
+
+cloud "workflow_dispatch" as manual
+manual --> BD
+manual --> CQ
+manual --> SQ
+
+BD --> DP
+CQ --> DP
+SQ --> DP
+
+DP --> cloud "GitHub Pages" as pages
+@enduml
 ```
 
 ## 2. 模組設計
@@ -75,26 +104,26 @@
 
 ## 3. 資料流
 
-```
-CSDI KML ──→ fetch_open_data.py ──→ .crewai/data/declared_monuments.json
-RVD XML  ──→ fetch_open_data.py ──→ .crewai/data/buildings_{urban,nt}.json
-                                         │
-                                         ▼
-                               .crewai/矩陣/**/*.md  (TOC 樹子檔案)
-                                         │
-                                         ▼
-                            run_tour_pipeline.py
-                                         │
-                          ┌──────────────┼──────────────┐
-                          ▼              ▼              ▼
-                    codebase/建築/   .crewai/矩陣/    git push
-                    NN-名稱.md      (狀態更新)       origin dev-001
-                                         │
-                                         ▼
-                               GitHub Actions CI/CD
-                                         │
-                                         ▼
-                              GitHub Pages (mdBook)
+```mermaid
+flowchart TB
+    CSDI["CSDI KML"] --> F["fetch_open_data.py"]
+    RVD["RVD XML"] --> F
+    F --> D1[".crewai/data/declared_monuments.json"]
+    F --> D2[".crewai/data/buildings_urban.json"]
+    F --> D3[".crewai/data/buildings_nt.json"]
+
+    D1 --> M[".crewai/矩陣/**/*.md (TOC 樹子檔案)"]
+    D2 --> M
+    D3 --> M
+
+    M --> P["run_tour_pipeline.py"]
+
+    P --> H["codebase/建築/NN-名稱.md"]
+    P --> MU[".crewai/矩陣/ (狀態更新)"]
+    P --> GP["git push origin dev-001"]
+
+    GP --> CI["GitHub Actions CI/CD"]
+    CI --> PG["GitHub Pages (mdBook)"]
 ```
 
 ## 4. 設計決策

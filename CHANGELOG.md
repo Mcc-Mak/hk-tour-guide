@@ -2,6 +2,21 @@
 
 本專案遵循 [Semantic Versioning](https://semver.org/)。
 
+## [0.3.0] — 2026-10-09
+
+### Fixed
+- 矩陣連結路徑修正：所有 `.crewai/矩陣/**/*.md` 子檔案中 2,160 條已完成項目的「歷史檔案（連結）」欄位，由 `](建築/...)` 修正為 `](codebase/建築/...)`，使其與規格書範例一致
+- `run_tour_pipeline.py` 中 `update_matrix_entry()` 呼叫處同步修正連結路徑前綴
+
+### Changed
+- `specbase/工作流程規格書.md` LLM timeout 由 180s 修正為 600s（與實作一致）
+- `specbase/工作流程規格書.md` 工作流程檔案結構由 `deploy-mdbook.yml` + `auto-merge.yml` 修正為單一 `ci-cd.yml`（與實作一致）
+- `specbase/工作流程規格書.md` RVD XML 下載 URL 修正為實際使用的 `res.data.gov.hk` API 端點（`bnb-u.xml` / `bnb-nt.xml`）
+- `specbase/工作流程規格書.md` LLM 配置段落擴充，新增三階段重試策略、Preflight 連線測試、CLI 旗標（`--priority-only` / `--priority-first`）說明
+
+### Removed
+- `run_tour_pipeline.py` 移除已棄用之死碼：`_detect_failed_agent()`、`_build_editor_task_with_context()`、`build_agents()` 的 `fallback_llm` / `fallback_indices` 參數（舊混合 LLM 重試策略遺留物）
+
 ## [0.2.0] — 2026-10-09
 
 ### Added

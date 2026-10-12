@@ -6,6 +6,8 @@ on:
       - dev-001
       - dev
   workflow_dispatch:
+  schedule:
+    - cron: '0 11 * * *' # Runs daily at 11:00 UTC
 
 concurrency:
   group: ci-cd
@@ -46,7 +48,7 @@ jobs:
           git push origin main
 
   codeql:
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
     runs-on: ubuntu-latest
     permissions:
       security-events: write
@@ -77,7 +79,7 @@ jobs:
           category: "/language:python"
 
   sonarqube:
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -92,7 +94,7 @@ jobs:
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
 
   build:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -124,7 +126,7 @@ jobs:
           path: codebase/site/book
 
   deploy:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
     needs: [build, codeql, sonarqube]
     runs-on: ubuntu-latest
     permissions:
@@ -136,4 +138,3 @@ jobs:
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4

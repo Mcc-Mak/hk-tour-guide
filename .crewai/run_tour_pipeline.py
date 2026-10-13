@@ -42,6 +42,44 @@ from crewai import Agent, Crew, Process, Task, LLM
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
+
+def _load_hko_env() -> None:
+    """載入 HKO LLM 憑證，覆蓋可能過時的容器環境變數。
+
+    沙箱在建立容器時即凍結 `HKOAI_API_KEY`，之後輪替金鑰不會反映到既有行程
+    的環境（「Invalid proxy server token passed」即源於此）。平台會把最新金鑰
+    寫入 `/root/.bash_env`（每次啟動重新產生），故優先讀取該檔；另支援專案內
+    的 `.crewai/.env` 作為可攜式覆寫（CI 或其他環境）。凡檔中提供的 `HKO*`
+    變數一律覆寫既有值，確保一律使用最新金鑰。
+    """
+    candidates = [
+        Path("/root/.bash_env"),
+        Path(__file__).resolve().parent / ".env",
+    ]
+    for path in candidates:
+        try:
+            if not path.is_file():
+                continue
+            with path.open(encoding="utf-8") as handle:
+                for raw in handle:
+                    line = raw.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    if line.startswith("export "):
+                        line = line[len("export "):]
+                    key, sep, value = line.partition("=")
+                    if not sep:
+                        continue
+                    key = key.strip()
+                    value = value.strip().strip('"').strip("'")
+                    if key.startswith("HKO"):
+                        os.environ[key] = value
+        except OSError:
+            continue
+
+
+_load_hko_env()
+
 MATRIX_PATH = "specbase/導賞目標建築矩陣.md"
 MATRIX_DIR = ".crewai/矩陣"
 BUILDING_DIR = "codebase/建築"

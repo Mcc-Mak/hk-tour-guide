@@ -2,6 +2,14 @@
 
 本專案遵循 [Semantic Versioning](https://semver.org/)。
 
+## [0.5.1] — 2026-10-13
+
+### Fixed
+- `.crewai/run_tour_pipeline.py` 於啟動時載入 HKO LLM 憑證，覆蓋沙箱建立容器時凍結的過時 `HKOAI_API_KEY`（即 `Authentication Error, Invalid proxy server token passed ... Unable to find token in cache` 錯誤根因）。載入優先序：平台每次啟動重新產生的 `/root/.bash_env`，其次為可攜式的 `.crewai/.env`；凡 `HKO*` 變數一律覆寫既有環境值。
+
+### Security
+- `.gitignore` 新增忽略 `.env` / `.env.*`（保留 `.env.example`），避免本機金鑰檔遭提交。
+
 ## [0.5.0] — 2026-10-09
 
 ### Added

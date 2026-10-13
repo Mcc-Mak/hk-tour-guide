@@ -16,6 +16,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 import traceback
 from datetime import datetime
 from pathlib import Path
@@ -428,7 +429,7 @@ def auto_git_commit_and_push(file_path: str, building_name: str, n_id: str, cred
     if matrix_file:
         git_add_args.append(matrix_file)
     run_git_command(git_add_args)
-    commit_subject = f"docs(tour): 生成 {building_name} 導賞手冊"
+    commit_subject = f"docs(tour): 生成 [{n_id}] {building_name} 導賞手冊"
     commit_body = (
         f"建築名稱：{building_name}\n"
         f"檔案路徑：{file_path}\n"
@@ -440,6 +441,11 @@ def auto_git_commit_and_push(file_path: str, building_name: str, n_id: str, cred
     )
     run_git_command(["commit", "-m", commit_subject, "-m", commit_body])
     run_git_command(["push", "origin", branch])
+
+    push_delay = int(os.getenv("TOUR_PUSH_DELAY", "30"))
+    if push_delay > 0:
+        print(f"⏳ 等待 {push_delay} 秒以避免 GitHub Actions CI/CD 競爭...")
+        time.sleep(push_delay)
 
 # ==========================================
 # 4. GitHub 議題與專案看板管理
@@ -862,6 +868,19 @@ def main():
         safe_name = _sanitize_filename(b_name)
         file_path = output_root / subdir / f"{n_id}-{safe_name}.md"
 
+        if "已完成" in completion:
+            print(f"⏭️  跳過已完成的建築 [編號 {item['N']}] {b_name}（狀態：{completion}）")
+            continue
+
+        if file_path.exists():
+            print(f"⏭️  跳過已存在手冊的建築 [編號 {item['N']}] {b_name}（檔案：{file_path}）")
+            continue
+
+        existing = glob.glob(str(output_root / subdir / f"{n_id}-*.md"))
+        if existing:
+            print(f"⏭️  跳過已存在手冊的建築 [編號 {item['N']}] {b_name}（檔案：{existing[0]}）")
+            continue
+
         print(f"--------------------------------------------------")
         print(f"🏗️ 正在處理 [編號 {item['N']}] {b_name} ({category}) | 狀態: {completion} -> 啟動 CrewAI...")
 
@@ -885,7 +904,11 @@ def main():
             f.write(content)
         print(f"📄 手冊已成功寫入: {file_path}")
 
-        updated_file = update_matrix_entry(item["N"], b_name, f"codebase/建築/{subdir}/{n_id}-{safe_name}.md", item.get("_matrix_file"))
+        handbook_url = f"codebase/建築/{subdir}/{n_id}-{safe_name}.md"
+        matrix_dir = os.path.dirname(item.get("_matrix_file", ""))
+        if matrix_dir:
+            handbook_url = os.path.relpath(handbook_url, matrix_dir)
+        updated_file = update_matrix_entry(item["N"], b_name, handbook_url, item.get("_matrix_file"))
 
         auto_git_commit_and_push(str(file_path), b_name, n_id=n_id, credibility=credibility, matrix_file=updated_file, branch="dev-001", model=model_used)
 

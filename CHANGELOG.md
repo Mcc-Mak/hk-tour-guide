@@ -2,6 +2,20 @@
 
 本專案遵循 [Semantic Versioning](https://semver.org/)。
 
+## [0.6.0] — 2026-10-13
+
+### Fixed
+- **矩陣連結 404 修正**：所有 `.crewai/矩陣/**/*.md` 子檔案中 3,818 條已完成項目的「歷史檔案（連結）」欄位，由 repo-relative 路徑 `](codebase/建築/...)` 修正為矩陣子檔案相對路徑 `](../../../codebase/建築/...)`（以 `os.path.relpath()` 動態計算），GitHub 上連結不再 404。
+- **手冊檔名 sanitization 統一**：511 個已完成建築的手冊檔案由未 sanitize 的原始名稱（含 `()`、`（）`、空格等）重新命名為 sanitized 名稱，與 `_sanitize_filename()` 輸出一致，消除管線因找不到檔案而重複執行已完成的建築。
+- **矩陣連結同步修正**：上述 511 條連結中有 25 條因檔名含 `)` 導致 Markdown 連結語法截斷，連同修正。
+- **跳過邏輯強化**：`run_tour_pipeline.py` 主迴圈新增 N-prefix glob fallback — 當 sanitized 檔名比對失敗時，以 `{N_id}-*.md` glob 搜尋已存在手冊，避免因檔名差異重複生成。
+- **CI/CD 觸發源收窄**：`.github/workflows/ci-cd.yml` 移除 `dev` 分支的 push 觸發（`auto_merge` 已將 `dev-001` → `dev` → `main` 一次完成），消除級聯 CI/CD 執行。
+
+### Changed
+- `run_tour_pipeline.py` 的 Git commit subject 加入編號 N：`docs(tour): 生成 [{n_id}] {building_name} 導賞手冊`，便於追蹤同名建築。
+- `run_tour_pipeline.py` 新增 push 延延遲（預設 30 秒，可由 `TOUR_PUSH_DELAY` 環境變數調整），避免密集 push 導致 GitHub Actions 排隊。
+- `specbase/工作流程規格書.md`、`AGENTS.md`、`codebase/docs/db-schema.md`、`codebase/site/scripts/build_mdbook.py` 連結格式文件同步更新為相對路徑格式。
+
 ## [0.5.1] — 2026-10-13
 
 ### Fixed

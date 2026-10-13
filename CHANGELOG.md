@@ -2,6 +2,16 @@
 
 本專案遵循 [Semantic Versioning](https://semver.org/)。
 
+## [0.7.0] — 2026-10-13
+
+### Changed
+- **手冊檔名加入地址**：建築識別由 `中文名稱` 改為 `中文名稱 + 中文地址`，手冊檔名由 `NNNNN-名稱.md` 改為 `NNNNN-名稱-地址.md`（地址 = `_sanitize_filename(中文地址)`）。3,818 份已完成手冊已全數重新命名，矩陣連結同步更新。
+- `run_tour_pipeline.py` `main()` 檔名生成及 `handbook_url` 連結生成加入 `safe_addr`。
+- `specbase/工作流程規格書.md`、`specbase/導賞目標建築矩陣.md`、`AGENTS.md`、`codebase/docs/{db-schema,srs,rtm,erd,pdr}.md` 檔名格式文件同步更新。
+
+### Fixed
+- **CI/CD deploy step 語法錯誤**：`.github/workflows/ci-cd.yml` `deploy` job 的「Deploy to GitHub Pages」step 缺少 `uses:` action，導致 workflow file invalid。補上 `uses: actions/deploy-pages@v4`。
+
 ## [0.6.0] — 2026-10-13
 
 ### Fixed

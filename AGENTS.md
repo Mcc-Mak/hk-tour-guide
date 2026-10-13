@@ -45,7 +45,7 @@ Follow these steps **in order**:
 Python + CrewAI. Core dependency is `crewai` (pinned in `.crewai/pyproject.toml` — see Setup below). Intended entrypoints:
 - `.crewai/fetch_open_data.py` — downloads HK open data into `.crewai/data/` (CSDI KML for declared monuments, RVD XML for buildings).
 - `.crewai/run_tour_pipeline.py` — main pipeline: parses `.crewai/矩陣/**/*.md` (TOC tree), shows a startup TUI (run all / run only 🌚 unstarted / priority first then rest / quit), runs a 4-agent crew per building, writes handbooks to `codebase/建築/`, dynamically updates the matrix sub-file's 歷史檔案（連結）column + status to 🌕, then auto-commits.
-- `codebase/建築/` — generated handbooks in category subdirectories: `codebase/建築/法定古蹟/NNNNN-名稱.md`, `codebase/建築/樓宇/市區/NNNNN-名稱.md`, and `codebase/建築/樓宇/新界/NNNNN-名稱.md`, where NNNNN = matrix `編號 {N}` zero-padded to 5 digits. Non-ASCII path: enforce UTF-8 in all file ops.
+- `codebase/建築/` — generated handbooks in category subdirectories: `codebase/建築/法定古蹟/NNNNN-名稱-地址.md`, `codebase/建築/樓宇/市區/NNNNN-名稱-地址.md`, and `codebase/建築/樓宇/新界/NNNNN-名稱-地址.md`, where NNNNN = matrix `編號 {N}` zero-padded to 5 digits and 地址 = sanitized `中文地址`. Non-ASCII path: enforce UTF-8 in all file ops.
 - `specbase/導賞目標建築矩陣.md` — **root TOC index file** linking to `.crewai/矩陣/**/*.md` sub-files. Does NOT contain building rows directly.
 - `.crewai/矩陣/` — **TOC tree sub-files** containing the actual building matrix rows, split by category into subdirectories to control file size. Each file's rows are sorted by `(name, address)` in Unicode codepoint order, then assigned per-file N starting from 1 (NOT globally unique — disambiguated by sub-directory):
   - `.crewai/矩陣/法定古蹟/建築.md` — 173 rows (CSDI KML, N=1–173)
@@ -67,7 +67,7 @@ There is no test suite, lint, or typecheck config yet — none should be assumed
 
 ## Pipeline behavior gotcha
 
-`parse_and_sort_building_matrix` reads sub-files in fixed order (`法定古蹟/建築.md` → `樓宇/市區建築.md` → `樓宇/新界建築.md`) and sorts by `(file_order, N)` where N is per-file (each file starts from 1, NOT globally unique). Within each sub-file, rows are pre-sorted by `(name, address)` in Python Unicode codepoint order and assigned contiguous N from 1. The 5-digit file id uses the sub-file's `編號 {N}` (zero-padded), disambiguated by the category sub-directory (`法定古蹟/` or `樓宇/市區/` or `樓宇/新界/`). After each handbook is written, `update_matrix_entry()` updates that building's row in the correct `.crewai/矩陣/**/*.md` sub-file (matched by **N value within the specified matrix_file**, not name): status → `🌕 已完成`, link → `` [`歷史檔案（連結）`](../../../codebase/建築/{法定古蹟|樓宇/市區|樓宇/新界}/NNNNN-名稱.md) `` (path relative to the matrix sub-file's directory, computed via `os.path.relpath()`).
+`parse_and_sort_building_matrix` reads sub-files in fixed order (`法定古蹟/建築.md` → `樓宇/市區建築.md` → `樓宇/新界建築.md`) and sorts by `(file_order, N)` where N is per-file (each file starts from 1, NOT globally unique). Within each sub-file, rows are pre-sorted by `(name, address)` in Python Unicode codepoint order and assigned contiguous N from 1. The 5-digit file id uses the sub-file's `編號 {N}` (zero-padded), disambiguated by the category sub-directory (`法定古蹟/` or `樓宇/市區/` or `樓宇/新界/`). After each handbook is written, `update_matrix_entry()` updates that building's row in the correct `.crewai/矩陣/**/*.md` sub-file (matched by **N value within the specified matrix_file**, not name): status → `🌕 已完成`, link → `` [`歷史檔案（連結）`](../../../codebase/建築/{法定古蹟|樓宇/市區|樓宇/新界}/NNNNN-名稱-地址.md) `` (path relative to the matrix sub-file's directory, computed via `os.path.relpath()`).
 
 ## Handbook section structure (enforced)
 
@@ -118,7 +118,7 @@ Analysis of pipeline execution logs reveals a consistent pattern:
 
 ## Content invariants (do not violate)
 
-- **歷史檔案（連結） must never be hardcoded.** It is produced dynamically by the Official Archives Researcher + Chief Editor agents as standard Markdown links (`[name](URL)`). Do not pre-fill it in `specbase/導賞目標建築矩陣.md` or `.crewai/矩陣/**/*.md` or template it statically. After each handbook is generated, `update_matrix_entry()` writes `` [`歷史檔案（連結）`](../../../codebase/建築/{法定古蹟|樓宇/市區|樓宇/新界}/NNNNN-名稱.md) `` into the matrix row in the correct `.crewai/矩陣/**/*.md` sub-file (path relative to the matrix sub-file's directory, computed via `os.path.relpath()`).
+- **歷史檔案（連結） must never be hardcoded.** It is produced dynamically by the Official Archives Researcher + Chief Editor agents as standard Markdown links (`[name](URL)`). Do not pre-fill it in `specbase/導賞目標建築矩陣.md` or `.crewai/矩陣/**/*.md` or template it statically. After each handbook is generated, `update_matrix_entry()` writes `` [`歷史檔案（連結）`](../../../codebase/建築/{法定古蹟|樓宇/市區|樓宇/新界}/NNNNN-名稱-地址.md) `` into the matrix row in the correct `.crewai/矩陣/**/*.md` sub-file (path relative to the matrix sub-file's directory, computed via `os.path.relpath()`).
 - All handbook output is **Traditional Chinese (繁體中文)** Markdown with the fixed 6-section structure defined in the spec's editor task.
 - CL ratings (1–5) and the 4 Emoji lifecycle states (🌚 未開始 / 🌒 進行中 / 🌗 審閱中 / 🌕 已完成) follow the spec's tables exactly.
 

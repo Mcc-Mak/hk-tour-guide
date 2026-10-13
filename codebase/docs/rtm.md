@@ -9,7 +9,7 @@
 | FR-03 | 啟動選單 TUI（4 種模式） | `.crewai/run_tour_pipeline.py` `main()` | 互動執行，4 種模式均可正確篩選 |
 | FR-04 | CrewAI 4 代理人執行 | `.crewai/run_tour_pipeline.py` `build_agents()` `build_tasks()` | 手冊生成且結構符合六段式 |
 | FR-05 | LLM 三階段備援 | `.crewai/run_tour_pipeline.py` `execute_crew_with_fallback()` | GLM 失敗時自動切換 DeepSeek |
-| FR-06 | 檔案命名與輸出 | `.crewai/run_tour_pipeline.py` `main()` | 檔名為 `NNNNN-名稱.md`，路徑正確 |
+| FR-06 | 檔案命名與輸出 | `.crewai/run_tour_pipeline.py` `main()` | 檔名為 `NNNNN-名稱-地址.md`，路徑正確 |
 | FR-07 | 矩陣更新 | `.crewai/run_tour_pipeline.py` `update_matrix_entry()` | 生成後矩陣狀態為 🌕，連結正確 |
 | FR-08 | Git 自動化 | `.crewai/run_tour_pipeline.py` `auto_git_commit_and_push()` | `git log` 可見自動提交 |
 | FR-09a | CI/CD 自動合併 | `.github/workflows/ci-cd.yml` `auto_merge` job | push 後 `dev`/`main` 更新 |

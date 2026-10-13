@@ -866,7 +866,8 @@ def main():
 
         subdir = _category_to_subdir(category, item.get("_matrix_file"))
         safe_name = _sanitize_filename(b_name)
-        file_path = output_root / subdir / f"{n_id}-{safe_name}.md"
+        safe_addr = _sanitize_filename(address)
+        file_path = output_root / subdir / f"{n_id}-{safe_name}-{safe_addr}.md"
 
         if "已完成" in completion:
             print(f"⏭️  跳過已完成的建築 [編號 {item['N']}] {b_name}（狀態：{completion}）")
@@ -904,7 +905,7 @@ def main():
             f.write(content)
         print(f"📄 手冊已成功寫入: {file_path}")
 
-        handbook_url = f"codebase/建築/{subdir}/{n_id}-{safe_name}.md"
+        handbook_url = f"codebase/建築/{subdir}/{n_id}-{safe_name}-{safe_addr}.md"
         matrix_dir = os.path.dirname(item.get("_matrix_file", ""))
         if matrix_dir:
             handbook_url = os.path.relpath(handbook_url, matrix_dir)

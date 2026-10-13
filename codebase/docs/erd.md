@@ -29,7 +29,7 @@ entity "矩陣子檔案\n.crewai/矩陣/**/*.md" as MatrixFile {
     歷史檔案（連結）
 }
 
-entity "導賞手冊\ncodebase/建築/NN-名稱.md" as Handbook {
+entity "導賞手冊\ncodebase/建築/NN-名稱-地址.md" as Handbook {
     *file_path : PK
     --
     n_id : FK
@@ -72,7 +72,7 @@ OpenData ||--o{ MatrixFile : "資料來源 (1:N)"
 
 | 屬性 | 鍵 | 說明 |
 | :--- | :---: | :--- |
-| file_path | PK | `codebase/建築/{subdir}/NNNNN-名稱.md` |
+| file_path | PK | `codebase/建築/{subdir}/NNNNN-名稱-地址.md` |
 | n_id | FK | 對應矩陣編號 N（零填補 5 位） |
 | subdir | | 子目錄（法定古蹟 / 樓宇/市區 / 樓宇/新界） |
 | content | | Markdown 內容（六段式結構） |

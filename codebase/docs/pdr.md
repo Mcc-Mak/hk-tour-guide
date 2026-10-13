@@ -14,7 +14,7 @@ flowchart TB
         E1 --> E2["Agent 2: 查核員"]
         E2 --> E3["Agent 3: 編劇"]
         E3 --> E4["Agent 4: 總編輯"]
-        E4 --> F1["寫入手冊 NN-名稱.md"]
+        E4 --> F1["寫入手冊 NN-名稱-地址.md"]
         E4 --> F2["更新矩陣 狀態+連結"]
         E4 --> F3["Git push dev-001"]
     end
@@ -118,7 +118,7 @@ flowchart TB
 
     M --> P["run_tour_pipeline.py"]
 
-    P --> H["codebase/建築/NN-名稱.md"]
+    P --> H["codebase/建築/NN-名稱-地址.md"]
     P --> MU[".crewai/矩陣/ (狀態更新)"]
     P --> GP["git push origin dev-001"]
 
